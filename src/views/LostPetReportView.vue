@@ -1,4 +1,4 @@
-<!-- LostPetReportView.vue -->
+<!-- src/views/LostPetReportView.vue -->
 <script setup>
 /* global google */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -32,6 +32,9 @@ const whenLost = computed(() =>
 )
 const address = computed(() => report.value?.address || '—')
 
+// owner username (για “by …”)
+const ownerUsername = computed(() => report.value?.owner || '—' )
+
 // -------- helpers --------
 async function apiGet(url, accept='application/json') {
   const res = await fetch(url, { headers: { Accept: accept } })
@@ -44,9 +47,9 @@ const sightingsLoading = ref(false)
 const sightingsError = ref('')
 
 // --- NEW: per-sighting details cache (DTO) ---
-const sightingDetails = ref(Object.create(null))        // { [id]: dto }
-const sightingDetailsLoading = ref(Object.create(null)) // { [id]: true/false }
-const sightingDetailsError = ref(Object.create(null))   // { [id]: string }
+const sightingDetails = ref(Object.create(null))
+const sightingDetailsLoading = ref(Object.create(null))
+const sightingDetailsError = ref(Object.create(null))
 
 async function ensureSightingDetails(sightingId){
   const key = String(sightingId)
@@ -54,7 +57,6 @@ async function ensureSightingDetails(sightingId){
   try{
     sightingDetailsLoading.value[key] = true
     const dto = await apiGet(`${backend}/api/lost-pet-reports/${id}/sighting-reports/${key}`)
-    // αποθήκευση όπως έρχεται (reporter, address, confidenceIndex, dateTimeSeen, latitude, longitude, imageUrls, notes)
     sightingDetails.value[key] = dto || {}
     sightingDetailsError.value[key] = ''
   }catch(e){
@@ -194,13 +196,11 @@ const overlayPhotoIndex = ref(0)
 // ---------- helpers για overlay ----------
 function getSightingPhotos(s){
   if (!s) return []
-  // Προτίμηση στο DTO (imageUrls), αλλιώς fallback στα παλιά πεδία
   if (Array.isArray(s.imageUrls) && s.imageUrls.length) return s.imageUrls
   const arr = s.images || s.photos || s.imageUrls || []
   return Array.isArray(arr) ? arr : []
 }
 function getSightingReporter(s){
-  // Προτίμηση στο DTO (reporter)
   if (s?.reporter) return s.reporter
   return s?.reporterUsername
     || s?.createdByUsername
@@ -231,7 +231,7 @@ function openSightingOverlay(i){
   overlayPhotoIndex.value = 0
   sightingOverlayOpen.value = true
   const sid = sightings.value[i]?.id
-  if (sid != null) ensureSightingDetails(sid) // fetch DTO
+  if (sid != null) ensureSightingDetails(sid)
 }
 function closeSightingOverlay(){ sightingOverlayOpen.value = false }
 function prevSightingPhoto(){
@@ -281,28 +281,47 @@ onMounted(loadData)
 <template>
   <main class="page">
     <section class="wrap" v-if="report">
-      <header class="head">
-        <div class="title">
-          <h1>Lost report</h1>
+      <!-- TOP HEADER -->
+      <header class="head-top">
+        <div class="left">
+          <h1 class="title">Lost pet report</h1>
           <span class="id">#{{ report.id }}</span>
+          <span class="dot">·</span>
+          <span class="by">by <b class="username">{{ ownerUsername }}</b></span>
+          <span v-if="report?.dateTimeLost" class="sep-dot">•</span>
+          <span v-if="report?.dateTimeLost" class="when">
+            {{ String(report.dateTimeLost).replace('T',' ').slice(0,16) }}
+          </span>
+
+        </div>
+        <div class="right">
+          <button v-if="app.isAuthenticated" class="btn" @click="goCreateSighting">Create sighting report</button>
         </div>
       </header>
 
-      <!-- PHOTOS -->
-      <section class="card full photos">
-        <div class="photos-head">
-          <h2 class="h2">Photos</h2>
-          <button v-if="app.isAuthenticated" class="btn" @click="goCreateSighting">Create sighting report</button>
+      <!-- PHOTOS (ίδιο στυλ με Found) -->
+      <section class="images">
+        <div class="head">
+          <h2 class="h">Photos</h2>
         </div>
 
-        <div v-if="images.length" class="gallery">
-          <figure v-for="(src,i) in images" :key="i" class="ph" @click="openViewer(i)">
-            <img :src="src || FALLBACK" alt="" loading="lazy" @error="onImgError" />
-            <div class="ph-zoom">View</div>
-          </figure>
+        <div v-if="images.length" class="grid-squares">
+          <div
+            v-for="(src, i) in images"
+            :key="i"
+            class="square"
+            @click="openViewer(i)"
+            :title="'Open image '+(i+1)"
+          >
+            <img :src="src || FALLBACK" alt="" @error="onImgError" />
+          </div>
         </div>
-        <div v-else class="gallery">
-          <figure class="ph"><img :src="FALLBACK" alt="No photo" /></figure>
+
+        <div v-else class="images-empty">
+          <div class="empty-box">
+            <img src="/no-image.jpg" alt="" class="empty-icon" />
+            <p class="empty-text">No images uploaded.</p>
+          </div>
         </div>
       </section>
 
@@ -422,7 +441,6 @@ onMounted(loadData)
             </div>
             <div v-if="activeSighting?.notes"><dt>Notes</dt><dd>{{ activeSighting?.notes }}</dd></div>
 
-            <!-- προαιρετικά: μικρό status για loading/error του detail -->
             <template v-if="activeSightingId">
               <div v-if="sightingDetailsLoading[String(activeSightingId)]"><dt>Details</dt><dd>Loading…</dd></div>
               <div v-else-if="sightingDetailsError[String(activeSightingId)]"><dt>Details</dt><dd class="err">{{ sightingDetailsError[String(activeSightingId)] }}</dd></div>
@@ -437,26 +455,55 @@ onMounted(loadData)
 <style scoped>
 .page { background:#fff; min-height:100dvh; }
 .wrap { max-width: 1200px; margin:0 auto; padding:20px; }
-.head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.title { display:flex; align-items:baseline; gap:10px; }
-.title h1 { margin:0; font-size:28px; font-weight:900; color:#103c70; }
-.id { color:#64748b; font-size:13px; }
 
-/* layout */
+/* ---------- Header πάνω --------- */
+.head-top{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin: 2px 0 12px;
+}
+.head-top .left{
+  display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+  color:#103c70;
+}
+.title { margin:0; font-size:28px; font-weight:900; color:#103c70; }
+.by { color:#0b2e55; font-weight:900; }
+.username { color:#164a8a; font-size: 20px;}
+.dot { opacity:.6; }
+.id { color:#64748b; font-size:13px; }
+.btn{
+  height:40px; padding:0 14px; border-radius:10px; border:2px solid #164a8a; background:#164a8a;
+  color:#fff; font-weight:800; cursor:pointer; transition: transform .12s ease, filter .15s ease;
+}
+.btn:hover{ filter:brightness(1.04); transform:translateY(-1px); }
+
+/* ---------- Photos section (ίδιο με Found) ---------- */
+.images { margin: 10px 0 16px; }
+.images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
+
+.grid-squares{
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px;
+}
+.square{
+  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
+  border-radius:12px; overflow:hidden; aspect-ratio:1/1; cursor:zoom-in;
+}
+.square img{ width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease; }
+.square:hover img{ transform: scale(1.02); }
+
+.images-empty{
+  background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
+  padding:16px; min-height:216px; display:grid; place-items:center;
+}
+.empty-box{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+.empty-icon{ width:96px; height:96px; object-fit:contain; opacity:.9; }
+.empty-text{ color:#475569; font-weight:700; }
+
+/* ---------- layout κάτω ---------- */
 .grid { display:grid; grid-template-columns: 2fr 1fr; gap:14px; }
 .card { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:14px; box-shadow:0 8px 24px rgba(16,60,112,.06); }
 .card.full { grid-column:1 / -1; }
 .h2 { margin:0 0 10px; font-size:18px; font-weight:900; color:#103c70; }
-
-/* photos */
-.photos-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.btn{ height:40px; padding:0 14px; border-radius:10px; border:2px solid #164a8a; background:#164a8a; color:#fff; font-weight:800; cursor:pointer; }
-.gallery { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
-.ph { position:relative; padding-top:66%; background:#e9effa; border-radius:12px; overflow:hidden; cursor:pointer; }
-.ph img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition: transform .2s ease; }
-.ph:hover img { transform: scale(1.02); }
-.ph-zoom { position:absolute; right:8px; bottom:8px; background:rgba(16,60,112,.9); color:#fff; font-weight:800; padding:4px 8px; border-radius:8px; opacity:0; transition:opacity .15s; font-size:12px; }
-.ph:hover .ph-zoom { opacity:1; }
 
 /* details card */
 .details { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; }
@@ -555,16 +602,8 @@ dd { margin:0; color:#1f3660; }
 /* Στοιχεία panel – χωρίς box */
 .sight-details{
   height: 100%;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 12px;
-  overflow: auto;
-  color: #0b2e55;
+  border: none; border-radius: 0; background: transparent; padding: 0;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; overflow: auto; color: #0b2e55;
 }
 .sight-details div{ display:contents; }
 .sight-details dt{ font-weight:800; color:#103c70; }

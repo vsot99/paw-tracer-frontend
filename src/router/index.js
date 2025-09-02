@@ -67,7 +67,20 @@ const router = createRouter({
       name: 'sighting-create',
       component: () => import('../views/CreateSightingReportView.vue'),
       props: true
+    },
+    {
+      path: '/lost/new',
+      name: 'lost-report-create',
+      component: () => import('@/views/CreateLostPetReportView.vue'),
+      meta: { requiresAuth: true }, // προαιρετικό
+    },
+    {
+      path: '/found/new',
+      name: 'found-report-create',
+      component: () => import('@/views/CreateFoundPetReportView.vue'),
+      meta: { requiresAuth: true }, // προαιρετικό
     }
+
 
 
   ]

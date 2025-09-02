@@ -1,13 +1,18 @@
 <!-- HomeView.vue -->
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 
 const router = useRouter()
 const app = useApplicationStore()
 const isAuthed = computed(() => app.isAuthenticated)
+const backend = import.meta.env.VITE_BACKEND
 
+// modal state
+const noPetsModalOpen = ref(false)
+
+// generic navigate helper
 function smartNavigate(candidates) {
   for (const c of candidates) {
     if (typeof c === 'object') {
@@ -19,11 +24,49 @@ function smartNavigate(candidates) {
   }
   router.push('/')
 }
-function createLost() {
-  smartNavigate([{ name:'lost-report-create' }, { name:'lost-create' }, '/lost/new'])
+
+// check pets from API (auth required)
+async function userHasAtLeastOnePet() {
+  try {
+    const headers = { Accept: 'application/json' }
+    if (app?.userData?.accessToken) headers.Authorization = `Bearer ${app.userData.accessToken}`
+    const res = await fetch(`${backend}/api/pets`, { headers })
+    if (!res.ok) return true /* μην μπλοκάρεις αν κάτι πάει στραβά */
+    const arr = await res.json()
+    return Array.isArray(arr) && arr.length > 0
+  } catch {
+    return true /* σε error, προχωράμε κανονικά */
+  }
 }
+
+async function createLost() {
+  if (!isAuthed.value) return
+  const hasPet = await userHasAtLeastOnePet()
+  if (hasPet) {
+    smartNavigate([{ name:'lost-report-create' }, { name:'lost-create' }, '/lost/new'])
+  } else {
+    noPetsModalOpen.value = true
+  }
+}
+
 function createFound() {
   smartNavigate([{ name:'found-report-create' }, { name:'found-create' }, '/found/new'])
+}
+
+// modal actions
+function closeNoPets() { noPetsModalOpen.value = false }
+function goAddPet() {
+  noPetsModalOpen.value = false
+  // Βάλε εδώ το σωστό route name/path για "Add pet" αν έχεις διαφορετικό.
+  smartNavigate([
+    { name: 'pet-create' },
+    { name: 'profile-pet-create' },
+    { name: 'profile-pets-new' },
+    '/profile/pets/new',
+    '/profile/pets',
+    { name: 'profile', query: { tab: 'pets' } },
+    '/profile'
+  ])
 }
 </script>
 
@@ -41,22 +84,21 @@ function createFound() {
           and get smart alerts from people nearby.
         </p>
 
-        <!-- CTA: δύο ίσα μπλε κουμπιά, δίπλα-δίπλα, ελεγχόμενο πλάτος -->
+        <!-- CTA: δύο ίσα μπλε κουμπιά -->
         <div
           v-if="isAuthed"
           :style="{
             display: 'flex',
             gap: '16px',
             marginTop: '18px',
-            /* κράτα τα δίπλα-δίπλα και μην προεξέχουν από το κείμενο */
-            maxWidth: '560px',   // ~κάτω από το 'is'
+            maxWidth: '560px',
             flexWrap: 'nowrap'
           }"
         >
           <button
             @click="createLost"
             style="
-              flex: 0 0 220px;        /* ίδιο πλάτος */
+              flex: 0 0 220px;
               height: 80px;
               background:#164a8a;
               color:#fff;
@@ -77,7 +119,7 @@ function createFound() {
           <button
             @click="createFound"
             style="
-              flex: 0 0 220px;        /* ίδιο πλάτος με το πρώτο */
+              flex: 0 0 220px;
               height: 80px;
               background:#164a8a;
               color:#fff;
@@ -125,6 +167,18 @@ function createFound() {
         <img class="pets" src="/home-hero.png" alt="Dogs and cats" />
       </div>
     </section>
+
+    <!-- No-pets overlay -->
+    <div v-if="noPetsModalOpen" class="overlay" @click.self="closeNoPets">
+      <div class="modal">
+        <h3>You don't have any pets added in your account</h3>
+        <p class="msg">To proceed, you have to add one.</p>
+        <div class="actions">
+          <button class="btn ghost" @click="closeNoPets">Close</button>
+          <button class="btn" @click="goAddPet">Add a pet</button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -149,4 +203,26 @@ function createFound() {
   .shell{ grid-template-columns:1fr; text-align:center; }
   .copy{ transform: translateY(-40px) !important; }
 }
+
+/* ---------- overlay ---------- */
+.overlay{
+  position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,.45);
+  display:grid; place-items:center; padding:16px;
+}
+.modal{
+  width:min(520px, 92vw);
+  background:#fff; border-radius:18px; padding:18px;
+  box-shadow:0 30px 80px rgba(0,0,0,.25);
+  text-align:center;
+}
+.modal h3{ margin:0 0 6px; color:#103c70; font-size:20px; font-weight:900; }
+.modal .msg{ margin:0 0 14px; color:#334155; font-weight:700; }
+.modal .actions{ display:flex; justify-content:center; gap:10px; }
+.btn{
+  height:40px; padding:0 16px; border-radius:10px; border:2px solid #164a8a;
+  background:#164a8a; color:#fff; font-weight:800; cursor:pointer;
+}
+.btn.ghost{ background:#fff; color:#164a8a; }
+.btn:hover{ filter:brightness(1.04); transform:translateY(-1px); }
 </style>
