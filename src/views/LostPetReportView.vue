@@ -23,7 +23,7 @@ const FALLBACK = '/no-image.jpg'
 function onImgError(e){ e.target.src = FALLBACK }
 
 // LOST REPORT photos (presigned)
-const images = computed(() => Array.isArray(report.value?.petImages) ? report.value.petImages : [])
+const images = computed(() => Array.isArray(report.value?.imagePresignedUrls) ? report.value.imagePresignedUrls : [])
 
 // βασικά fields
 const name = computed(() => report.value?.petName || '—')

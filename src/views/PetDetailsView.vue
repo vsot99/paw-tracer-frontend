@@ -1,5 +1,6 @@
+<!-- src/views/PetView.vue (updated with Lost-style Photos + per-tile trash delete) -->
 <script setup>
-import { ref, computed, onMounted, onUnmounted, reactive, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 import { useRemoteData } from '@/composables/useRemoteData.js'
@@ -18,28 +19,115 @@ const { data, error, loading, performRequest } = useRemoteData(urlRef, authRef)
 onMounted(() => { loading.value = true; performRequest() })
 const pet = computed(() => data.value || null)
 
-// εικόνες για εμφάνιση (presigned πρώτα, αλλιώς raw)
-const displayImages = computed(() => {
+// ---------- PHOTOS (Lost-style grid + overlay) ----------
+const images = computed(() => {
   const p = pet.value
   if (!p) return []
   if (Array.isArray(p.presignedImageUrls) && p.presignedImageUrls.length) {
-    return p.presignedImageUrls.map((src, i) => ({ src, kind: 'presigned', index: i }))
+    return p.presignedImageUrls.filter(Boolean)
   }
   if (Array.isArray(p.imageUrls) && p.imageUrls.length) {
-    return p.imageUrls.map((src, i) => ({ src, kind: 'raw', index: i }))
+    return p.imageUrls.filter(Boolean)
   }
   return []
 })
-function resolveDeletableUrl(img) {
+
+// Map from tile index -> deletable raw URL
+function resolveDeletableUrlFromIndex(idx) {
   const p = pet.value
-  if (!p) return img.src
-  if (img.kind === 'raw') return img.src
-  if (Array.isArray(p.imageUrls) && p.imageUrls[img.index]) return p.imageUrls[img.index]
-  return img.src
+  if (!p) return null
+  if (Array.isArray(p.presignedImageUrls) && p.presignedImageUrls.length) {
+    if (Array.isArray(p.imageUrls) && p.imageUrls[idx]) return p.imageUrls[idx]
+    return p.presignedImageUrls[idx] || null
+  }
+  if (Array.isArray(p.imageUrls) && p.imageUrls.length) {
+    return p.imageUrls[idx] || null
+  }
+  return null
 }
 
 const FALLBACK = '/no-image.jpg'
 function onImgError(e){ e.target.src = FALLBACK }
+
+// Overlay viewer (same behavior as Lost view)
+const viewerOpen  = ref(false)
+const viewerIndex = ref(0)
+function openViewer(i){ viewerIndex.value = i; viewerOpen.value = true }
+function closeViewer(){ viewerOpen.value = false }
+function prevImg(){ if (images.value.length) viewerIndex.value = (viewerIndex.value - 1 + images.value.length) % images.value.length }
+function nextImg(){ if (images.value.length) viewerIndex.value = (viewerIndex.value + 1) % images.value.length }
+function onKey(e){
+  if (viewerOpen.value){
+    if (e.key === 'Escape') return closeViewer()
+    if (e.key === 'ArrowLeft') return prevImg()
+    if (e.key === 'ArrowRight') return nextImg()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
+watch(images, arr => {
+  if (!arr?.length) viewerOpen.value = false
+  if (viewerIndex.value >= (arr?.length || 0)) viewerIndex.value = 0
+})
+
+// --- Upload photos ---
+const fileInput = ref(null), uploading = ref(false)
+function openFilePicker(){ fileInput.value?.click() }
+async function onFilesSelected(e){
+  const files = Array.from(e.target.files || []); if(!files.length) return
+  const fd = new FormData(); files.forEach(f=> fd.append('file', f))
+  uploading.value=true
+  try{
+    const res = await fetch(`${backend}/api/pets/${petId}/images`, {
+      method:'POST',
+      headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) },
+      body: fd
+    })
+    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to upload (${res.status})`) }
+    loading.value=true; await performRequest()
+  }catch(e){ alert(e.message || 'Upload failed.') } finally{
+    uploading.value=false; if(fileInput.value) fileInput.value.value=''
+  }
+}
+
+// --- Delete PET ---
+const confirmOpen = ref(false), confirmingDelete = ref(false), confirmError = ref('')
+function askDelete(){ confirmError.value=''; confirmOpen.value=true }
+async function confirmDelete(){
+  confirmingDelete.value=true; confirmError.value=''
+  try{
+    const res=await fetch(`${backend}/api/pets/${petId}`,{ method:'DELETE', headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) }})
+    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to delete pet (${res.status})`) }
+    confirmOpen.value=false; router.replace('/profile')
+  }catch(e){ confirmError.value=e.message||'Could not delete.' } finally{ confirmingDelete.value=false }
+}
+function cancelDelete(){ confirmOpen.value=false }
+
+// --- Delete IMAGE (per-tile trash) ---
+const photoConfirmOpen = ref(false)
+const photoTargetIndex = ref(null)
+const deletingImg = ref(false)
+function askDeletePhotoByIndex(i){
+  photoTargetIndex.value = i
+  photoConfirmOpen.value = true
+}
+async function confirmDeletePhoto(){
+  if(photoTargetIndex.value == null) return
+  deletingImg.value = true
+  try{
+    const imageUrl = resolveDeletableUrlFromIndex(photoTargetIndex.value)
+    const res = await fetch(`${backend}/api/pets/${petId}/images?imageUrl=${encodeURIComponent(imageUrl)}`, {
+      method:'DELETE',
+      headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) }
+    })
+    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to delete image (${res.status})`) }
+    loading.value=true; await performRequest()
+    photoConfirmOpen.value=false
+  }catch(e){ alert(e.message||'Could not delete image.') } finally{
+    deletingImg.value=false; photoTargetIndex.value=null
+  }
+}
+function cancelDeletePhoto(){ photoConfirmOpen.value=false; photoTargetIndex.value=null }
 
 // ---------- EDITABLE DETAILS ----------
 const editableKeys = ['color','size','age','weight','microchipNumber','behavior']
@@ -51,7 +139,6 @@ const temp = reactive({
   color:'', size:'', age:null, weight:null, microchipNumber:'', behavior:''
 })
 
-// size options: περιλαμβάνω το τρέχον value και μερικές κοινές τιμές
 const sizeOptions = computed(() => {
   const base = ['SMALL','MEDIUM','LARGE','EXTRA_LARGE']
   const cur = (pet.value?.size ?? '').toString().toUpperCase()
@@ -69,12 +156,7 @@ function startEdit(){
   temp.behavior = p.behavior ?? ''
   isEditing.value = true
 }
-
-function cancelEdit(){
-  isEditing.value = false
-  editError.value = ''
-  editSuccess.value = ''
-}
+function cancelEdit(){ isEditing.value = false; editError.value = ''; editSuccess.value = '' }
 
 function diffEditablePayload(){
   const p = pet.value || {}
@@ -85,7 +167,6 @@ function diffEditablePayload(){
     if (k === 'age' && newVal !== null && newVal !== '') newVal = Number.parseInt(newVal)
     if (k === 'weight' && newVal !== null && newVal !== '') newVal = Number.parseFloat(newVal)
     if (k === 'size' && typeof newVal === 'string') newVal = newVal.toUpperCase()
-    // μόνο αν άλλαξε:
     if (String(oldVal ?? '') !== String(newVal ?? '')) out[k] = newVal
   }
   return out
@@ -94,63 +175,33 @@ function diffEditablePayload(){
 async function saveEdit(){
   editError.value = ''; editSuccess.value = ''
   const payload = diffEditablePayload()
-  if (!Object.keys(payload).length){
-    editSuccess.value = 'Δεν έγιναν αλλαγές.'
-    isEditing.value = false
-    return
-  }
-  // απλό validation
-  if (payload.age !== undefined && (payload.age < 0 || !Number.isFinite(payload.age))) {
-    editError.value = 'Το age πρέπει να είναι μη αρνητικός αριθμός.'
-    return
-  }
-  if (payload.weight !== undefined && (payload.weight < 0 || !Number.isFinite(payload.weight))) {
-    editError.value = 'Το weight πρέπει να είναι μη αρνητικός αριθμός.'
-    return
-  }
+  if (!Object.keys(payload).length){ editSuccess.value = 'Δεν έγιναν αλλαγές.'; isEditing.value = false; return }
+  if (payload.age !== undefined && (payload.age < 0 || !Number.isFinite(payload.age))) { editError.value = 'Το age πρέπει να είναι μη αρνητικός αριθμός.'; return }
+  if (payload.weight !== undefined && (payload.weight < 0 || !Number.isFinite(payload.weight))) { editError.value = 'Το weight πρέπει να είναι μη αρνητικός αριθμός.'; return }
 
   saving.value = true
   try{
     const res = await fetch(`${backend}/api/pets/${petId}`, {
       method:'PUT',
-      headers:{
-        'Content-Type':'application/json',
-        ...(app.userData?.accessToken ? { Authorization:`Bearer ${app.userData.accessToken}` } : {})
-      },
+      headers:{ 'Content-Type':'application/json', ...(app.userData?.accessToken ? { Authorization:`Bearer ${app.userData.accessToken}` } : {}) },
       body: JSON.stringify(payload)
     })
-    if(!res.ok){
-      const t = await res.text().catch(()=> '')
-      throw new Error(t || `Failed to update pet (${res.status})`)
-    }
-    // sync το τοπικό αντικείμενο:
+    if(!res.ok){ const t = await res.text().catch(()=> ''); throw new Error(t || `Failed to update pet (${res.status})`) }
     data.value = { ...(data.value || {}), ...payload }
     editSuccess.value = 'Οι αλλαγές αποθηκεύτηκαν.'
     isEditing.value = false
-  }catch(e){
-    editError.value = e.message || 'Αποτυχία ενημέρωσης.'
-  }finally{
-    saving.value = false
-  }
+  }catch(e){ editError.value = e.message || 'Αποτυχία ενημέρωσης.' } finally{ saving.value = false }
 }
 
-// ---------- VIEW DETAILS (όλα τα πεδία εκτός id, qrCodeToken, σύνθετα/arrays) ----------
-function prettyLabel(key){
-  // camelCase -> "Camel Case", microchipNumber -> "Microchip Number"
-  return key
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, s => s.toUpperCase())
-    .trim()
-}
+// ---------- VIEW DETAILS ----------
+function prettyLabel(key){ return key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim() }
 const viewEntries = computed(() => {
   const p = pet.value
   if (!p) return []
   const exclude = new Set(['id','qrCodeToken'])
-  // Αγνοώ arrays/objects (π.χ. imageUrls) για καθαρό UI
   const entries = Object.keys(p)
     .filter(k => !exclude.has(k) && (p[k] === null || ['string','number','boolean'].includes(typeof p[k])))
     .map(k => ({ key:k, label: prettyLabel(k), value: p[k] }))
-  // Προσπάθεια να κρατήσω σχετικά ωραία σειρά:
   const order = ['name','species','breed','color','size','gender','age','weight','microchipNumber','behavior','address','latitude','longitude','createdAt','updatedAt']
   entries.sort((a,b) => {
     const ia = order.indexOf(a.key), ib = order.indexOf(b.key)
@@ -183,83 +234,6 @@ async function openQr() {
 }
 function closeQr(){ qrOpen.value=false }
 function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; a.download=`pet-${pet.value?.id}-qr.png`; document.body.appendChild(a); a.click(); a.remove() }
-
-// --- Delete PET ---
-const confirmOpen = ref(false), confirmingDelete = ref(false), confirmError = ref('')
-function askDelete(){ confirmError.value=''; confirmOpen.value=true }
-async function confirmDelete(){
-  confirmingDelete.value=true; confirmError.value=''
-  try{
-    const res=await fetch(`${backend}/api/pets/${petId}`,{ method:'DELETE', headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) }})
-    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to delete pet (${res.status})`) }
-    confirmOpen.value=false; router.replace('/profile')
-  }catch(e){ confirmError.value=e.message||'Could not delete.' } finally{ confirmingDelete.value=false }
-}
-function cancelDelete(){ confirmOpen.value=false }
-
-// --- Delete IMAGE ---
-const photoConfirmOpen = ref(false)
-const photoTarget = ref(null)
-const deletingImg = ref(false)
-function askDeletePhoto(img){
-  photoTarget.value = img
-  photoConfirmOpen.value = true
-}
-async function confirmDeletePhoto(){
-  if(!photoTarget.value) return
-  deletingImg.value = true
-  try{
-    const imageUrl = resolveDeletableUrl(photoTarget.value)
-    const res = await fetch(`${backend}/api/pets/${petId}/images?imageUrl=${encodeURIComponent(imageUrl)}`, {
-      method:'DELETE',
-      headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) }
-    })
-    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to delete image (${res.status})`) }
-    loading.value=true; await performRequest()
-    photoConfirmOpen.value=false
-  }catch(e){ alert(e.message||'Could not delete image.') } finally{ deletingImg.value=false }
-}
-function cancelDeletePhoto(){ photoConfirmOpen.value=false }
-
-// --- Upload photos ---
-const fileInput = ref(null), uploading = ref(false)
-function openFilePicker(){ fileInput.value?.click() }
-async function onFilesSelected(e){
-  const files = Array.from(e.target.files || []); if(!files.length) return
-  const fd = new FormData(); files.forEach(f=> fd.append('file', f))
-  uploading.value=true
-  try{
-    const res = await fetch(`${backend}/api/pets/${petId}/images`, {
-      method:'POST',
-      headers:{ ...(app.userData?.accessToken?{Authorization:`Bearer ${app.userData.accessToken}`}:{}) },
-      body: fd
-    })
-    if(!res.ok){ const t=await res.text().catch(()=> ''); throw new Error(t||`Failed to upload (${res.status})`) }
-    loading.value=true; await performRequest()
-  }catch(e){ alert(e.message || 'Upload failed.') } finally{
-    uploading.value=false; if(fileInput.value) fileInput.value.value=''
-  }
-}
-
-// --- Lightbox (overlay gallery) ---
-const lightboxOpen = ref(false)
-const lightboxIndex = ref(0)
-function openLightbox(i){ lightboxIndex.value = i; lightboxOpen.value = true }
-function closeLightbox(){ lightboxOpen.value = false }
-const totalImages = computed(()=> displayImages.value.length)
-function lbSrc(idx){ return displayImages.value[idx]?.src || FALLBACK }
-function prevImage(){ if(!totalImages.value) return; lightboxIndex.value = (lightboxIndex.value - 1 + totalImages.value) % totalImages.value }
-function nextImage(){ if(!totalImages.value) return; lightboxIndex.value = (lightboxIndex.value + 1) % totalImages.value }
-// keyboard
-function onKey(e){
-  if(lightboxOpen.value){
-    if(e.key === 'Escape') closeLightbox()
-    if(e.key === 'ArrowLeft') prevImage()
-    if(e.key === 'ArrowRight') nextImage()
-  }
-}
-onMounted(()=> window.addEventListener('keydown', onKey))
-onUnmounted(()=> window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
@@ -283,30 +257,41 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
       </header>
 
       <div class="grid">
+        <!-- PHOTOS (Lost-style grid + per-tile trash like before) -->
         <section class="card full">
-          <h2 class="h2">Photos</h2>
-          <div v-if="displayImages.length" class="gallery">
-            <figure
-              v-for="(img, i) in displayImages"
-              :key="img.src"
-              class="ph"
-              @click="openLightbox(i)"
-            >
-              <img :src="img.src || FALLBACK" alt="" loading="lazy" @error="onImgError" />
-              <!-- trash button (hover) -->
-              <button
-                class="trash"
-                :title="'Delete image'"
-                @click.stop="askDeletePhoto(img)"
+          <div class="images">
+            <div class="head">
+              <h2 class="h">Photos</h2>
+            </div>
+
+            <div v-if="images.length" class="grid-squares">
+              <div
+                v-for="(src, i) in images"
+                :key="i"
+                class="square"
+                :title="'Open image '+(i+1)"
               >
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                  <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9z" fill="currentColor"/>
-                </svg>
-              </button>
-            </figure>
-          </div>
-          <div v-else class="gallery">
-            <figure class="ph"><img :src="FALLBACK" alt="" /></figure>
+                <img :src="src || FALLBACK" alt="" @error="onImgError" @click="openViewer(i)" />
+                <!-- trash button (bottom-right), same UX as before -->
+                <button
+                  class="trash"
+                  :title="'Delete image'"
+                  @click.stop="askDeletePhotoByIndex(i)"
+                  aria-label="Delete image"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <path d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v8h-2V9zm4 0h2v8h-2V9zM7 9h2v8H7V9z" fill="currentColor"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div v-else class="images-empty">
+              <div class="empty-box">
+                <img src="/no-image.jpg" alt="" class="empty-icon" />
+                <p class="empty-text">No images uploaded.</p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -328,7 +313,7 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
             </div>
           </div>
 
-          <!-- VIEW MODE: δυναμική λίστα όλων των πεδίων (εκτός id/qrCodeToken) -->
+          <!-- VIEW MODE -->
           <dl v-if="!isEditing" class="details">
             <template v-for="e in viewEntries" :key="e.key">
               <div>
@@ -338,9 +323,8 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
             </template>
           </dl>
 
-          <!-- EDIT MODE: editable πεδία + immutable πεδία (disabled) -->
+          <!-- EDIT MODE -->
           <form v-else class="edit-grid" @submit.prevent="saveEdit">
-            <!-- Editable left -->
             <div class="col fields">
               <label class="field">
                 <span>Color</span>
@@ -375,7 +359,6 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
               </label>
             </div>
 
-            <!-- Immutable right: όλα τα υπόλοιπα ως disabled -->
             <div class="col immutables">
               <div class="immutable-grid">
                 <label v-for="e in immutableEntries" :key="e.key" class="field">
@@ -435,7 +418,7 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
       </div>
     </div>
 
-    <!-- DELETE PHOTO CONFIRM (blue UI) -->
+    <!-- DELETE PHOTO CONFIRM -->
     <div v-if="photoConfirmOpen" class="overlay" @click.self="cancelDeletePhoto">
       <div class="modal">
         <header class="modal-head">
@@ -454,12 +437,15 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
       </div>
     </div>
 
-    <!-- LIGHTBOX -->
-    <div v-if="lightboxOpen" class="overlay" @click.self="closeLightbox">
-      <button class="nav prev" @click.stop="prevImage" aria-label="Previous">‹</button>
-      <img class="lightbox-img" :src="lbSrc(lightboxIndex)" alt="" />
-      <button class="nav next" @click.stop="nextImage" aria-label="Next">›</button>
-      <button class="x abs" @click="closeLightbox" aria-label="Close">✕</button>
+    <!-- LOST-STYLE PHOTOS OVERLAY -->
+    <div v-if="viewerOpen && images.length" class="overlay" @click.self="closeViewer">
+      <button class="close" @click="closeViewer" aria-label="Close">✕</button>
+      <button class="nav prev" @click.stop="prevImg" aria-label="Prev">‹</button>
+      <figure class="viewer">
+        <img :src="images[viewerIndex] || FALLBACK" alt="photo" @error="onImgError" />
+        <figcaption>{{ viewerIndex+1 }} / {{ images.length }}</figcaption>
+      </figure>
+      <button class="nav next" @click.stop="nextImg" aria-label="Next">›</button>
     </div>
   </main>
 </template>
@@ -482,25 +468,6 @@ onUnmounted(()=> window.removeEventListener('keydown', onKey))
 .card.full { grid-column: 1 / -1; }
 .h2 { margin:0 0 10px; font-size:18px; font-weight:900; color:#103c70; }
 
-/* Photos */
-.gallery { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
-.ph { position:relative; padding-top:66%; background:#e9effa; border-radius:12px; overflow:hidden; cursor:zoom-in; }
-.ph img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-
-/* Hover trash */
-.trash {
-  position:absolute; right:8px; bottom:8px;
-  width:34px; height:34px; border-radius:10px;
-  border:1px solid rgba(0,0,0,.1);
-  background: rgba(255,255,255,.95);
-  color:#b42318; display:flex; align-items:center; justify-content:center;
-  cursor:pointer; opacity:0; transform: translateY(4px);
-  transition: opacity .18s ease, transform .18s ease, filter .15s ease;
-}
-.ph:hover .trash { opacity:1; transform: translateY(0); }
-.trash:hover { filter: brightness(0.96); }
-
-/* Details */
 .details-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
 .row-actions { display:flex; gap:8px; }
 .details { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; }
@@ -510,7 +477,6 @@ dd { margin:0; color:#1f3660; }
 .err { color:#b00020; margin-top:8px; }
 .loading { color:#164a8a; padding:24px; }
 
-/* Edit mode */
 .edit-grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start; }
 .col { min-width:0; }
 .fields { display:grid; gap:12px; }
@@ -519,17 +485,15 @@ dd { margin:0; color:#1f3660; }
 input, select, textarea { border:1px solid rgba(0,0,0,.14); border-radius:12px; padding:10px 12px; font-size:16px; outline:none; }
 input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
 
-/* Immutable pane */
 .immutables { background:#f9fbff; border:1px dashed rgba(16,60,112,.12); border-radius:12px; padding:10px; }
 .immutable-grid { display:grid; grid-template-columns: 1fr; gap:10px; }
 input.immutable { background:#f3f4f6; color:#6b7280; cursor:not-allowed; }
 
-/* Alerts */
 .alert { padding:10px 12px; border-radius:10px; margin:10px 0 0; font-size:14px; }
 .alert.err { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 .alert.ok  { background:#e8f7ef; color:#114b2d; border:1px solid #bfe7cf; }
 
-/* Overlays base */
+/* ---------- Shared overlays ---------- */
 .overlay { position:fixed; inset:0; background:rgba(0,0,0,.58); display:flex; align-items:center; justify-content:center; padding:16px; z-index:60; }
 .modal { width:min(520px, 96vw); background:#fff; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.3); overflow:hidden; }
 .modal-head { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:#f2f6fd; border-bottom:1px solid rgba(0,0,0,.06); color:#103c70; font-weight:800; }
@@ -539,14 +503,51 @@ input.immutable { background:#f3f4f6; color:#6b7280; cursor:not-allowed; }
 .x { border:none; background:transparent; font-size:20px; line-height:1; cursor:pointer; color:#0b2e55; }
 .x.abs { position:absolute; top:12px; right:14px; color:#fff; }
 
-/* Lightbox */
-.lightbox-img { max-width:min(92vw,1200px); max-height:80vh; border-radius:14px; box-shadow:0 30px 80px rgba(0,0,0,.4); }
-.nav {
-  position:absolute; top:50%; transform: translateY(-50%);
-  width:48px; height:48px; border-radius:50%; border:2px solid #fff;
-  background:rgba(11,46,85,.9); color:#fff; font-size:28px; line-height:46px; text-align:center;
-  cursor:pointer; user-select:none;
+/* ---------- Photos section (Lost-style grid) ---------- */
+.images { margin: 10px 0 16px; }
+.images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
+
+.grid-squares{
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px;
 }
-.nav.prev { left:24px; }
-.nav.next { right:24px; }
+.square{
+  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
+  border-radius:12px; overflow:hidden; aspect-ratio:1/1; cursor:zoom-in;
+}
+.square img{ width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease; }
+.square:hover img{ transform: scale(1.02); }
+
+.images-empty{
+  background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
+  padding:16px; min-height:216px; display:grid; place-items:center;
+}
+.empty-box{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+.empty-icon{ width:96px; height:96px; object-fit:contain; opacity:.9; }
+.empty-text{ color:#475569; font-weight:700; }
+
+/* Per-tile trash button (exactly like before, adapted to .square) */
+.trash {
+  position:absolute; right:8px; bottom:8px;
+  width:34px; height:34px; border-radius:10px;
+  border:1px solid rgba(0,0,0,.1);
+  background: rgba(255,255,255,.95);
+  color:#b42318; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; opacity:0; transform: translateY(4px);
+  transition: opacity .18s ease, transform .18s ease, filter .15s ease;
+}
+.square:hover .trash { opacity:1; transform: translateY(0); }
+.trash:hover { filter: brightness(0.96); }
+
+/* ---------- Lost-style photo overlay ---------- */
+.viewer { position:relative; width:min(96vw, 1200px); max-height:92vh; margin:0; }
+.viewer img { width:100%; height:auto; max-height:80vh; display:block; border-radius:12px; object-fit:contain; background:#111; }
+.viewer figcaption { text-align:center; color:#fff; margin-top:8px; font-weight:700; }
+.close { position:absolute; top:14px; right:16px; z-index:2; background:transparent; border:none; color:#fff; font-size:28px; cursor:pointer; }
+.nav { position:absolute; top:50%; transform:translateY(-50%); width:56px; height:56px; border-radius:50%; border:2px solid #fff; background:rgba(255,255,255,.15); color:#fff; font-size:30px; line-height:1; cursor:pointer; }
+.nav:hover { background:rgba(255,255,255,.25); }
+.nav.prev { left:18px; }
+.nav.next { right:18px; }
+
+@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
 </style>

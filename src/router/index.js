@@ -79,6 +79,11 @@ const router = createRouter({
       name: 'found-report-create',
       component: () => import('@/views/CreateFoundPetReportView.vue'),
       meta: { requiresAuth: true }, // προαιρετικό
+    },
+    {
+      path: '/about',
+      name: 'about',
+      component: () => import('@/views/AboutView.vue'),
     }
 
 

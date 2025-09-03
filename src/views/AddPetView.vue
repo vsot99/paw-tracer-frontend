@@ -1,5 +1,6 @@
+<!-- src/views/AddPetView.vue -->
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 
@@ -7,28 +8,98 @@ const backendEnvVar = import.meta.env.VITE_BACKEND
 const router = useRouter()
 const app = useApplicationStore()
 
-// Enums από το backend
-const SPECIES = ['DOG', 'CAT', 'OTHER']
+/* ================== Enums (UI) ================== */
+const SPECIES = ['DOG', 'CAT'] // Species κανονικά
 const SIZES   = ['SMALL', 'MEDIUM', 'LARGE', 'EXTRA_LARGE']
 const GENDERS = ['MALE', 'FEMALE']
 
-// Μοντέλο φόρμας
+/* ================== Form model ================== */
 const form = ref({
-  // AbstractPet (όλα required)
   species: 'DOG',
-  breed: '',
+  breed: '',        // τιμή από dropdown (ή "Other")
   color: '',
   size: 'MEDIUM',
   gender: 'MALE',
-  // Pet (required)
   name: '',
   age: null,
   weight: null,
-  // Pet (optional)
   microchipNumber: '',
   behavior: ''
 })
 
+/* ================== Breeds data ================== */
+const breeds = ref({ DOG: [], CAT: [] })
+async function loadBreeds() {
+  const readTxt = async (url) => {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return []
+      const txt = await res.text()
+      return txt
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith('#'))
+    } catch { return [] }
+  }
+  const [cats, dogs] = await Promise.all([
+    readTxt('/breeds/cat_breeds.txt'),
+    readTxt('/breeds/dog_breeds_fci.txt')
+  ])
+  breeds.value = { CAT: cats, DOG: dogs }
+}
+onMounted(loadBreeds)
+
+/* ================== Breed combobox ================== */
+const breedQuery = ref('')
+const showBreedMenu = ref(false)
+const breedWrapEl = ref(null)
+
+/* Λίστα φυλών για το επιλεγμένο species, με "Other" στο τέλος */
+const availableBreeds = computed(() => {
+  const list = form.value.species === 'DOG' ? breeds.value.DOG
+    : form.value.species === 'CAT' ? breeds.value.CAT
+      : []
+  return list;
+})
+const filteredBreeds = computed(() => {
+  const q = breedQuery.value.trim().toLowerCase()
+  if (!q) return availableBreeds.value
+  return availableBreeds.value.filter(b => b.toLowerCase().startsWith(q))
+})
+
+function pickBreed(b) {
+  form.value.breed = b
+  breedQuery.value = b
+  showBreedMenu.value = false
+}
+
+/* Αν αλλάξει species, καθάρισε τυχόν επιλογές breed/custom */
+watch(() => form.value.species, () => {
+  showBreedMenu.value = false
+  form.value.breed = ''
+  breedQuery.value = ''
+  customBreed.value = ''
+})
+
+/* Κράτα συγχρονισμένο το query όταν επιλέγεται breed */
+watch(() => form.value.breed, (v) => {
+  if (v && v !== breedQuery.value) breedQuery.value = v
+})
+
+/* Click-outside για να κρύβεται το menu */
+function onDocClick(e){
+  const el = breedWrapEl.value
+  if (!el) return
+  if (!el.contains(e.target)) showBreedMenu.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+/* ================== Custom breed όταν Breed=Other ================== */
+const customBreed = ref('')
+const isOtherBreed = computed(() => form.value.breed === 'Other')
+
+/* ================== Validation & Submit ================== */
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -36,12 +107,27 @@ function validate() {
   errorMsg.value = ''
   const f = form.value
 
-  // AbstractPet required
-  if (!f.species || !f.breed.trim() || !f.color.trim() || !f.size || !f.gender) {
+  if (!f.species) {
+    errorMsg.value = 'Species is required.'
+    return false
+  }
+
+  if (!f.breed) {
+    errorMsg.value = 'Please pick a breed from the list.'
+    return false
+  }
+
+  if (isOtherBreed.value) {
+    if (!customBreed.value.trim()) {
+      errorMsg.value = 'Please fill "Insert breed manually".'
+      return false
+    }
+  }
+
+  if (!f.color.trim() || !f.size || !f.gender) {
     errorMsg.value = 'Please complete all required pet attributes.'
     return false
   }
-  // Pet required
   if (!f.name.trim()) {
     errorMsg.value = 'Name is required.'
     return false
@@ -60,45 +146,36 @@ function validate() {
 async function submit() {
   if (!validate()) return
   loading.value = true
-
   try {
     const token = app.userData?.accessToken
 
-    // Φτιάξε payload χωρίς QR code και χωρίς imageUrls
     const payload = {
-      species: form.value.species,
-      breed: form.value.breed.trim(),
+      species: String(form.value.species).toUpperCase(), // 'DOG' | 'CAT'
+      breed: isOtherBreed.value
+        ? customBreed.value.trim()
+        : String(form.value.breed).trim(),
       color: form.value.color.trim(),
       size: form.value.size,
       gender: form.value.gender,
-
       name: form.value.name.trim(),
       age: Number(form.value.age),
       weight: Number(form.value.weight),
     }
-    // optional μόνο αν έχουν δοθεί
-    if (form.value.microchipNumber && form.value.microchipNumber.trim() !== '') {
-      payload.microchipNumber = form.value.microchipNumber.trim()
-    }
-    if (form.value.behavior && form.value.behavior.trim() !== '') {
-      payload.behavior = form.value.behavior.trim()
-    }
+    if (form.value.microchipNumber?.trim()) payload.microchipNumber = form.value.microchipNumber.trim()
+    if (form.value.behavior?.trim())        payload.behavior = form.value.behavior.trim()
 
     const res = await fetch(`${backendEnvVar}/api/pets`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     })
-
     if (!res.ok) {
       const txt = await res.text().catch(() => '')
       throw new Error(txt || `Failed to create pet (${res.status})`)
     }
-
-    // const created = await res.json() // αν το χρειαστείς
     router.push('/profile')
   } catch (e) {
     errorMsg.value = e.message || 'Failed to create pet.'
@@ -118,58 +195,108 @@ async function submit() {
       <p v-if="errorMsg" class="alert">{{ errorMsg }}</p>
 
       <form class="grid" @submit.prevent="submit">
-        <!-- Αριστερή στήλη -->
+        <!-- Name -->
         <label class="field">
           <span>Name *</span>
           <input v-model.trim="form.name" required />
         </label>
 
+        <!-- Species -->
         <label class="field">
           <span>Species *</span>
-          <select v-model="form.species">
+          <select v-model="form.species" required>
             <option v-for="s in SPECIES" :key="s" :value="s">{{ s }}</option>
           </select>
         </label>
 
-        <label class="field">
+        <!-- Breed (searchable dropdown) -->
+        <div class="field breed-field" ref="breedWrapEl">
           <span>Breed *</span>
-          <input v-model.trim="form.breed" required />
+
+          <div class="combo">
+            <input
+              class="combo-input"
+              v-model="breedQuery"
+              type="text"
+              placeholder="Search breed…"
+              @focus="showBreedMenu = true"
+              @input="showBreedMenu = true"
+              :aria-expanded="showBreedMenu ? 'true' : 'false'"
+              autocomplete="off"
+              required
+            />
+            <button
+              type="button"
+              class="combo-caret"
+              @click="showBreedMenu = !showBreedMenu"
+              aria-label="Toggle breed list"
+            >▾</button>
+          </div>
+
+          <ul v-show="showBreedMenu" class="menu" role="listbox">
+            <li
+              v-for="b in filteredBreeds"
+              :key="b"
+              class="item"
+              role="option"
+              @mousedown.prevent="pickBreed(b)"
+            >{{ b }}</li>
+            <li v-if="filteredBreeds.length === 0" class="empty-item">No matches</li>
+          </ul>
+
+        </div>
+
+        <!-- Insert breed manually (only when Breed=Other) -->
+        <label class="field" v-if="isOtherBreed">
+          <span>Insert breed manually *</span>
+          <input
+            v-model.trim="customBreed"
+            placeholder="Insert breed manually"
+            required
+          />
         </label>
 
+        <!-- Color -->
         <label class="field">
           <span>Color *</span>
           <input v-model.trim="form.color" required />
         </label>
 
+        <!-- Size -->
         <label class="field">
           <span>Size *</span>
-          <select v-model="form.size">
+          <select v-model="form.size" required>
             <option v-for="s in SIZES" :key="s" :value="s">{{ s }}</option>
           </select>
         </label>
 
+        <!-- Gender -->
         <label class="field">
           <span>Gender *</span>
-          <select v-model="form.gender">
+          <select v-model="form.gender" required>
             <option v-for="g in GENDERS" :key="g" :value="g">{{ g }}</option>
           </select>
         </label>
 
+        <!-- Age -->
         <label class="field">
           <span>Age (years) *</span>
           <input v-model.number="form.age" type="number" min="0" step="1" required />
         </label>
 
+        <!-- Weight -->
         <label class="field">
           <span>Weight (kg) *</span>
           <input v-model.number="form.weight" type="number" min="0" step="0.1" required />
         </label>
 
+        <!-- Microchip -->
         <label class="field">
           <span>Microchip number</span>
           <input v-model.trim="form.microchipNumber" />
         </label>
 
+        <!-- Behavior -->
         <label class="field full">
           <span>Behavior</span>
           <textarea v-model.trim="form.behavior" rows="3" />
@@ -218,6 +345,41 @@ textarea { height:auto; padding:10px 12px; }
 input:focus, select:focus, textarea:focus {
   border-color:var(--brand-600); box-shadow:0 0 0 3px rgba(22,74,138,.12);
 }
+
+/* Breed combobox (overlay dropdown) */
+.breed-field { position: relative; }
+.combo{ position:relative; display:flex; align-items:center; }
+.combo-input{
+  flex:1; height:44px; padding-right:34px;
+  border-radius:12px; border:1px solid rgba(0,0,0,.14); font-size:16px; outline:none;
+}
+.combo-input:focus{ border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
+.combo-caret{
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  height:32px; min-width:32px; border-radius:8px;
+  border:1px solid rgba(0,0,0,.14); background:#fff; z-index:1001; cursor:pointer;
+}
+
+/* Το menu δεν σπρώχνει το layout */
+.menu{
+  position:absolute;
+  left:0; right:0;
+  top:calc(100% + 6px);
+  z-index:1000;
+
+  margin:0;
+  border:1px solid rgba(0,0,0,.14);
+  border-radius:12px; background:#fff;
+  box-shadow:0 12px 28px rgba(16,60,112,.16);
+
+  max-height:224px;
+  overflow:auto;
+  list-style:none; padding:6px;
+}
+.item{ padding:8px 10px; border-radius:8px; cursor:pointer; }
+.item:hover{ background:#f3f7ff; }
+.empty-item{ padding:8px 10px; color:#64748b; }
+.picked{ color:#0b2e55; font-size:12px; margin-top:4px; }
 
 /* Actions */
 .actions { grid-column: 1 / -1; display:flex; gap:10px; margin-top:6px; }

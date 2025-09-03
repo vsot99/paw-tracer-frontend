@@ -1,7 +1,7 @@
 <!-- src/views/CreateFoundPetReportView.vue -->
 <script setup>
 /* global google */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 
@@ -16,7 +16,7 @@ const loading  = ref(false)
 const errorMsg = ref('')
 const okMsg    = ref('')
 
-// ----- Enums (ταιριάζουν με backend: DOG | CAT | OTHER, κτλ.) -----
+// ----- Enums -----
 const SPECIES_OPTIONS = ['DOG','CAT','OTHER']
 const SIZE_OPTIONS    = ['SMALL','MEDIUM','LARGE','EXTRA_LARGE']
 const GENDER_OPTIONS  = ['MALE','FEMALE']
@@ -38,13 +38,84 @@ const form = ref({
   size: null,
   gender: null,
   hasCollar: null,
-  collarColor: '',          // <-- ΝΕΟ (required αν hasCollar === true)
-  name: '',                 // optional, αλλά required αν nameOnCollar === true
+  collarColor: '',
+  name: '',
   approximateBehavior: ''
 })
 
-// UI-only helper: “Is there a name on it?”
+// UI-only helper
 const nameOnCollar = ref(null) // true | false | null
+
+// ===== Breed data & combobox (identical logic to AddPetView, adjusted to show manual field BELOW) =====
+const breeds = ref({ DOG: [], CAT: [] })
+async function loadBreeds() {
+  const readTxt = async (url) => {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) return []
+      const txt = await res.text()
+      return txt
+        .split('\\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith('#'))
+    } catch { return [] }
+  }
+  const [cats, dogs] = await Promise.all([
+    readTxt('/breeds/cat_breeds.txt'),
+    readTxt('/breeds/dog_breeds_fci.txt')
+  ])
+  breeds.value = { CAT: cats, DOG: dogs }
+}
+onMounted(loadBreeds)
+
+const breedQuery = ref('')
+const showBreedMenu = ref(false)
+const breedWrapEl = ref(null)
+
+// Include "Other" as option at the end
+const availableBreeds = computed(() => {
+  const list = form.value.species === 'DOG' ? breeds.value.DOG
+    : form.value.species === 'CAT' ? breeds.value.CAT
+      : []
+  return [...list, 'Other']
+})
+const filteredBreeds = computed(() => {
+  const q = breedQuery.value.trim().toLowerCase()
+  if (!q) return availableBreeds.value
+  return availableBreeds.value.filter(b => b.toLowerCase().includes(q))
+})
+
+function pickBreed(b) {
+  form.value.breed = b
+  breedQuery.value = b
+  showBreedMenu.value = false
+}
+
+// Reset when species changes
+watch(() => form.value.species, () => {
+  showBreedMenu.value = false
+  form.value.breed = ''
+  breedQuery.value = ''
+  customBreed.value = ''
+})
+
+// Keep query synced
+watch(() => form.value.breed, (v) => {
+  if (v && v !== breedQuery.value) breedQuery.value = v
+})
+
+// Click-outside to close menu
+function onDocClick(e){
+  const el = breedWrapEl.value
+  if (!el) return
+  if (!el.contains(e.target)) showBreedMenu.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+// Manual breed when Breed = Other
+const customBreed = ref('')
+const isOtherBreed = computed(() => form.value.breed === 'Other')
 
 // ----- Google Maps / Places -----
 const mapEl = ref(null)
@@ -137,20 +208,26 @@ async function onSubmit(){
     errorMsg.value = 'Please specify if you are temporarily keeping the pet.'
     return
   }
-  if (!form.value.species || !form.value.breed || !form.value.color || !form.value.size || !form.value.gender){
-    errorMsg.value = 'Please complete the pet description (species, breed, color, size, gender).'
+  if (!form.value.species || !form.value.color || !form.value.size || !form.value.gender){
+    errorMsg.value = 'Please complete the pet description (species, color, size, gender).'
+    return
+  }
+  if (!form.value.breed){
+    errorMsg.value = 'Please pick a breed from the list.'
+    return
+  }
+  if (isOtherBreed.value && !String(customBreed.value || '').trim()){
+    errorMsg.value = 'Please fill "Insert breed manually".'
     return
   }
   if (typeof form.value.hasCollar !== 'boolean'){
     errorMsg.value = 'Please specify if the pet wore a collar.'
     return
   }
-  // ΝΕΟ: απαιτούμε collarColor όταν έχει κολάρο
-  if (form.value.hasCollar === true && !String(form.value.collarColor || '').trim()){
+  if (form.value.hasCollor === true && !String(form.value.collarColor || '').trim()){
     errorMsg.value = 'Please provide the collar color.'
     return
   }
-  // ΝΕΟ: απαιτούμε name όταν υπάρχει όνομα στο κολάρο
   if (form.value.hasCollar === true && nameOnCollar.value === true && !String(form.value.name || '').trim()){
     errorMsg.value = 'Please provide the name on the collar (or choose No).'
     return
@@ -166,7 +243,9 @@ async function onSubmit(){
     notes: form.value.notes || undefined,
 
     species: String(form.value.species),
-    breed: String(form.value.breed).trim(),
+    breed: isOtherBreed.value
+      ? String(customBreed.value).trim()
+      : String(form.value.breed).trim(),
     color: String(form.value.color).trim(),
     size: String(form.value.size),
     gender: String(form.value.gender),
@@ -195,7 +274,7 @@ async function onSubmit(){
     const data = await res.json().catch(() => null)
     if (data?.id != null) newId = data.id
     if (!newId) {
-      // fallback: αν ο server στείλει Location header
+      // fallback: if server sends Location header
       const loc = res.headers.get('Location')
       const m = loc && loc.match(/\/found-pet-reports\/(\d+)/)
       if (m) newId = Number(m[1])
@@ -205,7 +284,6 @@ async function onSubmit(){
       okMsg.value = 'Found pet report created successfully.'
       router.replace({ path: `/found/${newId}` })
     } else {
-      // safety fallback
       okMsg.value = 'Report created, but could not detect new ID.'
       router.replace({ path: '/' })
     }
@@ -280,10 +358,51 @@ async function onSubmit(){
             </select>
           </label>
 
-          <!-- Breed -->
-          <label class="field">
+          <!-- Breed (searchable dropdown) -->
+          <div class="field breed-field" ref="breedWrapEl">
             <span>Breed <b class="req">*</b></span>
-            <input v-model.trim="form.breed" required placeholder="e.g. Mixed, Labrador…" />
+
+            <div class="combo">
+              <input
+                class="combo-input"
+                v-model="breedQuery"
+                type="text"
+                placeholder="Search breed…"
+                @focus="showBreedMenu = true"
+                @input="showBreedMenu = true"
+                :aria-expanded="showBreedMenu ? 'true' : 'false'"
+                autocomplete="off"
+                required
+              />
+              <button
+                type="button"
+                class="combo-caret"
+                @click="showBreedMenu = !showBreedMenu"
+                aria-label="Toggle breed list"
+              >▾</button>
+            </div>
+
+            <ul v-show="showBreedMenu" class="menu" role="listbox">
+              <li
+                v-for="b in filteredBreeds"
+                :key="b"
+                class="item"
+                role="option"
+                @mousedown.prevent="pickBreed(b)"
+                @click="pickBreed(b)"
+              >{{ b }}</li>
+              <li v-if="filteredBreeds.length === 0" class="empty-item">No matches</li>
+            </ul>
+          </div>
+
+          <!-- Insert breed manually (only when Breed=Other). Appears directly UNDER breed -->
+          <label class="field" v-if="isOtherBreed">
+            <span>Insert breed manually <b class="req">*</b></span>
+            <input
+              v-model.trim="customBreed"
+              placeholder="Insert breed manually"
+              required
+            />
           </label>
 
           <!-- Color -->
@@ -414,6 +533,32 @@ input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0
 .alert { padding:10px 12px; border-radius:10px; margin:0 0 10px; }
 .alert.err { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 .alert.ok  { background:#e8f6ee; color:#0f5132; border:1px solid #badbcc; }
+
+/* Breed combobox (overlay dropdown) — force vertical stacked items */
+.breed-field { position: relative; }
+.combo{ position:relative; display:flex; align-items:center; }
+.combo-input{
+  flex:1; height:44px; padding-right:34px;
+  border-radius:12px; border:1px solid rgba(0,0,0,.14); font-size:16px; outline:none;
+}
+.combo-input:focus{ border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
+.combo-caret{
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  height:32px; min-width:32px; border-radius:8px;
+  border:1px solid rgba(0,0,0,.14); background:#fff; z-index:1001; cursor:pointer;
+}
+.menu{
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:1000;
+  margin:0; padding:6px; border:1px solid rgba(0,0,0,.14); border-radius:12px; background:#fff;
+  box-shadow:0 12px 28px rgba(16,60,112,.16);
+  max-height:224px; overflow:auto; list-style:none;
+}
+.menu .item{
+  display:block;               /* ensures vertical stacking even if a global reset sets li inline */
+  padding:8px 10px; border-radius:8px; cursor:pointer; white-space:normal;
+}
+.menu .item:hover{ background:#f3f7ff; }
+.empty-item{ padding:8px 10px; color:#64748b; }
 
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
