@@ -1,14 +1,26 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import SearchResultRow from '@/components/search/SearchResultRow.vue'
+import { useApplicationStore } from '@/stores/application.js'
 
 const backend = import.meta.env.VITE_BACKEND
 const GMAPS_KEY = import.meta.env.VITE_GMAPS_KEY || import.meta.env.VITE_GMAPS_API_KEY
 
+// store & helper για headers με token
+const store = useApplicationStore()
+function buildHeaders(accept = 'application/json') {
+  const headers = { Accept: accept }
+  const token = store?.userData?.accessToken
+  if (token && String(token).trim().length > 0) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  return headers
+}
+
 // Τύπος αναζήτησης (ΜΗΝ αλλάξεις τη λογική)
 const type = ref('lost')
 
-// Φίλτρα (κρατάμε ακριβώς τη λογική σου — ΔΕΝ στέλνουμε empty strings)
+// Φίλτρα
 const form = reactive({
   species: '', size: '', gender: '',
   breed: '', color: '',
@@ -16,13 +28,51 @@ const form = reactive({
   lat: null, lng: null, radiusKm: 3
 })
 
-// Δεν στέλνουμε page/size params (όπως ζήτησες)
+// ================== Breeds data ==================
+const breeds = ref({ DOG: [], CAT: [] })
+async function loadBreeds() {
+  const readTxt = async (url) => {
+    try {
+      const res = await fetch(url, { headers: buildHeaders('text/plain') })
+      if (!res.ok) return []
+      const txt = await res.text()
+      return txt
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith('#'))
+    } catch { return [] }
+  }
+  const [cats, dogs] = await Promise.all([
+    readTxt('/breeds/cat_breeds.txt'),
+    readTxt('/breeds/dog_breeds_fci.txt')
+  ])
+  breeds.value = { CAT: cats, DOG: dogs }
+}
+onMounted(loadBreeds)
+
+// ================== Breed dropdown ==================
+const availableBreeds = computed(() => {
+  const base = form.species === 'DOG' ? breeds.value.DOG
+    : form.species === 'CAT' ? breeds.value.CAT
+      : []
+  return [...base, 'Other']
+})
+
+const customBreed = ref('')
+const isOtherBreed = computed(() => form.breed === 'Other')
+
+// Αν αλλάξει species, καθάρισε επιλογές
+watch(() => form.species, () => {
+  form.breed = ''
+  customBreed.value = ''
+})
+
+// ================== Networking ==================
 const urlRef = ref('')
 const loading = ref(false)
 const error = ref('')
 const data = ref(null)
 
-// helper: πρόσθεσε param ΜΟΝΟ αν έχει νόημα
 function setIf(p, key, v) {
   if (v === null || v === undefined) return
   if (typeof v === 'string' && v.trim() === '') return
@@ -38,7 +88,16 @@ function buildUrl () {
   setIf(p, 'species', form.species)
   setIf(p, 'size',    form.size)
   setIf(p, 'gender',  form.gender)
-  setIf(p, 'breed',   form.breed)
+
+  // Breed param
+  let breedParam = null
+  if (form.species === 'DOG' || form.species === 'CAT') {
+    breedParam = isOtherBreed.value
+      ? customBreed.value.trim()
+      : String(form.breed || '').trim()
+  }
+  setIf(p, 'breed', breedParam)
+
   setIf(p, 'color',   form.color)
 
   if (form.lat != null && form.lng != null) {
@@ -55,10 +114,21 @@ async function fetchResults () {
   try {
     loading.value = true
     error.value = ''
+
+    if (isOtherBreed.value && !customBreed.value.trim()) {
+      error.value = 'Please fill "Insert breed manually".'
+      data.value = null
+      urlRef.value = ''
+      return
+    }
+
     urlRef.value = buildUrl()
-    const res = await fetch(urlRef.value, { method: 'GET', headers: { Accept: 'application/json' } })
+    const res = await fetch(urlRef.value, {
+      method: 'GET',
+      headers: buildHeaders('application/json')
+    })
     if (!res.ok) {
-      const txt = await res.text().catch(()=>'')
+      const txt = await res.text().catch(()=> '')
       throw new Error(`HTTP ${res.status} ${res.statusText}${txt ? ' – ' + txt : ''}`)
     }
     data.value = await res.json()
@@ -72,7 +142,6 @@ async function fetchResults () {
 
 function runSearch () { fetchResults() }
 
-// normalize Page / Array
 const items = computed(() => {
   const v = data.value
   if (!v) return []
@@ -81,7 +150,7 @@ const items = computed(() => {
   return []
 })
 
-// ---------- Google Places Autocomplete (μόνο input, χωρίς χάρτη) ----------
+// ---------- Google Places Autocomplete ----------
 const areaInputRef = ref(null)
 
 function loadGooglePlacesOnce () {
@@ -110,7 +179,6 @@ function initAutocomplete () {
   const ac = new g.maps.places.Autocomplete(areaInputRef.value, {
     fields: ['geometry', 'name'],
     types: ['(cities)'],
-    // componentRestrictions: { country: 'gr' },
     sessionToken
   })
   ac.addListener('place_changed', () => {
@@ -132,7 +200,6 @@ function clearArea () {
 onMounted(async () => {
   const ok = await loadGooglePlacesOnce()
   if (ok) initAutocomplete()
-  // Πρώτη κλήση χωρίς φίλτρα (όπως Postman)
   runSearch()
 })
 
@@ -160,7 +227,6 @@ watch(type, () => runSearch())
             <option value="">Any</option>
             <option value="DOG">Dog</option>
             <option value="CAT">Cat</option>
-            <option value="OTHER">Other</option>
           </select>
         </div>
 
@@ -185,13 +251,26 @@ watch(type, () => runSearch())
         </div>
 
         <div class="row">
-          <label class="lbl">Breed</label>
-          <input v-model.trim="form.breed" type="text" placeholder="e.g., husky" />
-        </div>
-
-        <div class="row">
           <label class="lbl">Color</label>
           <input v-model.trim="form.color" type="text" placeholder="e.g., white" />
+        </div>
+
+        <div class="row" v-if="form.species==='DOG' || form.species==='CAT'">
+          <label class="lbl">Breed</label>
+          <select v-model="form.breed">
+            <option value="">Select…</option>
+            <option v-for="b in availableBreeds" :key="b" :value="b">{{ b }}</option>
+          </select>
+        </div>
+
+        <div class="row" v-if="isOtherBreed">
+          <label class="lbl"> </label>
+          <input
+            class="other-input"
+            v-model.trim="customBreed"
+            placeholder="Insert breed manually *"
+            required
+          />
         </div>
 
         <div class="row area">
@@ -213,7 +292,6 @@ watch(type, () => runSearch())
         </div>
       </form>
 
-      <!-- Προαιρετικό debug -->
       <p class="debug">URL: {{ urlRef }}</p>
 
       <!-- ΑΠΟΤΕΛΕΣΜΑΤΑ -->
@@ -240,7 +318,6 @@ watch(type, () => runSearch())
 .wrap { max-width:1200px; margin:0 auto; padding:20px; }
 .title { font-size:28px; font-weight:900; color:#103c70; margin:6px 0 16px; }
 
-/* ΦΙΛΤΡΑ */
 .filters {
   display:grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -251,7 +328,7 @@ watch(type, () => runSearch())
   border-radius:14px;
   margin-bottom:8px;
 }
-.row { display:flex; align-items:center; gap:10px; }
+.row { position:relative; display:flex; align-items:center; gap:10px; }
 .lbl { min-width:80px; color:#103c70; font-weight:800; }
 select, input[type="text"] {
   flex:1; height:40px; padding:0 10px;
@@ -282,24 +359,27 @@ select:focus, input:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,7
 
 .debug { margin:8px 0 0; font-size:12px; color:#475569; }
 
-/* ΑΠΟΤΕΛΕΣΜΑΤΑ */
 .results { margin-top:8px; }
 .info { color:#164a8a; }
 .err { color:#b00020; }
 
-/* Λίστα rows */
 .list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
-
 @media (max-width: 980px){
   .list {grid-template-columns: 1fr;}
 }
-
 @media (max-width: 980px){
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .row.area, .actions { grid-column: 1 / -1; }
 }
+
+/* Inline custom breed input */
+.other-input{
+  flex:1; height:40px; padding:0 10px;
+  border:1px solid #cfe0fb; border-radius:10px; outline:none;
+}
+.other-input:focus{ border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
 </style>

@@ -14,7 +14,6 @@ const gmapsKey = import.meta.env.VITE_GMAPS_KEY || import.meta.env.VITE_GMAPS_AP
 const mapId    = import.meta.env.VITE_GMAPS_MAP_ID
 
 const id = route.params.id
-
 const report  = ref(null)
 const loading = ref(false)
 const error   = ref('')
@@ -35,10 +34,31 @@ const address = computed(() => report.value?.address || '—')
 // owner username (για “by …”)
 const ownerUsername = computed(() => report.value?.owner || '—' )
 
-// -------- helpers --------
+/* -------- auth / ownership -------- */
+const currentUsername = computed(() =>
+  app?.userData?.username || app?.userData?.user?.username || null
+)
+const isAuthenticated = computed(() => !!app?.isAuthenticated)
+const isOwner = computed(() =>
+  !!currentUsername.value && !!ownerUsername.value && currentUsername.value === ownerUsername.value
+)
+
+/* -------- status helpers -------- */
+const statusRaw = computed(() => String(report.value?.status || '').toUpperCase())
+const isActive  = computed(() => statusRaw.value === 'ACTIVE') // εμφανίζουμε owner buttons μόνο τότε
+const statusText = computed(() => {
+  switch (statusRaw.value) {
+    case 'RETURNED_HOME': return 'Returned home'
+    case 'CANCELLED':     return 'Cancelled'
+    case 'ACTIVE':        return 'Active'
+    default:              return report.value?.status || '—'
+  }
+})
+
+/* -------- helpers -------- */
 async function apiGet(url, accept='application/json') {
   const res = await fetch(url, { headers: { Accept: accept } })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) throw new Error(await res.text().catch(()=>`HTTP ${res.status}`))
   return accept === 'application/json' ? res.json() : res.blob()
 }
 
@@ -46,7 +66,7 @@ const sightings = ref([])
 const sightingsLoading = ref(false)
 const sightingsError = ref('')
 
-// --- NEW: per-sighting details cache (DTO) ---
+// --- per-sighting details cache (DTO) ---
 const sightingDetails = ref(Object.create(null))
 const sightingDetailsLoading = ref(Object.create(null))
 const sightingDetailsError = ref(Object.create(null))
@@ -98,7 +118,40 @@ async function loadSightings(){
   }
 }
 
-// -------- Google Maps --------
+/* -------- change status (owner only) -------- */
+const busyStatus = ref(false)
+async function changeStatus(newStatus){
+  if (!isOwner.value || !isAuthenticated.value) return
+  try{
+    busyStatus.value = true
+    const headers = { 'Content-Type': 'application/json' }
+    const token = app?.userData?.accessToken
+    if (token) headers.Authorization = `Bearer ${token}`
+
+    const res = await fetch(`${backend}/api/lost-pet-reports/${id}/status`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(newStatus) // "RETURNED_HOME" ή "CANCELLED"
+    })
+    if (!res.ok){
+      const t = await res.text().catch(()=> '')
+      throw new Error(t || `HTTP ${res.status}`)
+    }
+    await loadData()
+  }catch(e){
+    error.value = e?.message || 'Failed to update status.'
+  }finally{
+    busyStatus.value = false
+  }
+}
+function confirmCancel(){
+  if (!isOwner.value) return
+  if (confirm('Are you sure you want to delete/cancel this report?')){
+    changeStatus('CANCELLED')
+  }
+}
+
+/* -------- Google Maps -------- */
 const mapEl = ref(null)
 let map, lostMarker
 let sightingMarkers = []
@@ -130,7 +183,6 @@ function initMap() {
     ...(mapId ? { mapId } : {})
   })
 
-  // Lost location pin (default red)
   lostMarker = new google.maps.Marker({ map, position: center, title: 'Lost location' })
 
   setTimeout(() => { if (map){ google.maps.event.trigger(map,'resize'); map.setCenter(center) } }, 60)
@@ -181,7 +233,7 @@ function renderSightingMarkers(){
   }
 }
 
-// -------- Overlays --------
+/* -------- Overlays -------- */
 const viewerOpen  = ref(false)
 const viewerIndex = ref(0)
 function openViewer(i){ viewerIndex.value = i; viewerOpen.value = true }
@@ -193,7 +245,6 @@ const sightingOverlayOpen = ref(false)
 const sightingIndex = ref(0)
 const overlayPhotoIndex = ref(0)
 
-// ---------- helpers για overlay ----------
 function getSightingPhotos(s){
   if (!s) return []
   if (Array.isArray(s.imageUrls) && s.imageUrls.length) return s.imageUrls
@@ -210,7 +261,6 @@ function getSightingReporter(s){
     || '—'
 }
 
-// ενεργό sighting (merged list item + DTO)
 const activeSighting = computed(() => {
   const s = sightings.value[sightingIndex.value]
   if (!s) return null
@@ -220,7 +270,6 @@ const activeSighting = computed(() => {
 const activePhotos = computed(() => getSightingPhotos(activeSighting.value))
 const activeSightingId = computed(() => sightings.value[sightingIndex.value]?.id)
 
-// άνοιγμα overlay + φόρτωση details
 function openSightingOverlayById(sid){
   const idx = sightings.value.findIndex(x => String(x.id) === String(sid))
   if (idx >= 0) openSightingOverlay(idx)
@@ -243,7 +292,6 @@ function nextSightingPhoto(){
   overlayPhotoIndex.value = (overlayPhotoIndex.value + 1) % p.length
 }
 
-// keyboard
 function onKey(e){
   if (viewerOpen.value){
     if (e.key === 'Escape') return closeViewer()
@@ -259,7 +307,6 @@ function onKey(e){
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
-// keep indices sane
 watch(images, arr => {
   if (!arr?.length) viewerOpen.value = false
   if (viewerIndex.value >= arr.length) viewerIndex.value = 0
@@ -288,18 +335,49 @@ onMounted(loadData)
           <span class="id">#{{ report.id }}</span>
           <span class="dot">·</span>
           <span class="by">by <b class="username">{{ ownerUsername }}</b></span>
+
           <span v-if="report?.dateTimeLost" class="sep-dot">•</span>
           <span v-if="report?.dateTimeLost" class="when">
             {{ String(report.dateTimeLost).replace('T',' ').slice(0,16) }}
           </span>
 
+          <!-- ΑΚΡΙΒΩΣ δίπλα από timestamp με ίδιο separator -->
+          <span v-if="report?.status" class="sep-dot">•</span>
+          <span v-if="report?.status" class="status-chip" :data-status="statusRaw">
+            {{ statusText }}
+          </span>
         </div>
+
         <div class="right">
-          <button v-if="app.isAuthenticated" class="btn" @click="goCreateSighting">Create sighting report</button>
+          <!-- NON-OWNER: Create sighting -->
+          <button
+            v-if="isAuthenticated && !isOwner"
+            class="btn"
+            @click="goCreateSighting"
+          >
+            Create sighting report
+          </button>
+
+          <!-- OWNER: Returned / Delete — ΜΟΝΟ όταν ACTIVE -->
+          <div v-else-if="isOwner && isActive" class="owner-actions">
+            <button
+              class="btn green"
+              :disabled="busyStatus"
+              @click="changeStatus('RETURNED_HOME')"
+              title="Mark as returned home"
+            >Returned home</button>
+
+            <button
+              class="btn red"
+              :disabled="busyStatus"
+              @click="confirmCancel"
+              title="Cancel / delete this report"
+            >Delete</button>
+          </div>
         </div>
       </header>
 
-      <!-- PHOTOS (ίδιο στυλ με Found) -->
+      <!-- PHOTOS -->
       <section class="images">
         <div class="head">
           <h2 class="h">Photos</h2>
@@ -397,7 +475,7 @@ onMounted(loadData)
       <button class="nav next" @click.stop="nextImg" aria-label="Next">›</button>
     </div>
 
-    <!-- SIGHTING OVERLAY (με DTO details) -->
+    <!-- SIGHTING OVERLAY -->
     <div v-if="sightingOverlayOpen && activeSighting" class="overlay sighting-ovl" @click.self="closeSightingOverlay">
       <button class="close" @click="closeSightingOverlay" aria-label="Close">✕</button>
 
@@ -413,11 +491,8 @@ onMounted(loadData)
         </header>
 
         <div class="sight-body">
-          <!-- Αριστερά: εικόνα -->
           <div class="sight-photos" v-if="activePhotos.length">
-            <img class="photo"
-                 :src="activePhotos[overlayPhotoIndex] || FALLBACK"
-                 alt="sighting photo" @error="onImgError" />
+            <img class="photo" :src="activePhotos[overlayPhotoIndex] || FALLBACK" alt="sighting photo" @error="onImgError" />
             <button class="nav in-image left"  @click.stop="prevSightingPhoto"  aria-label="Prev">‹</button>
             <button class="nav in-image right" @click.stop="nextSightingPhoto" aria-label="Next">›</button>
             <div class="counter-ovl">{{ overlayPhotoIndex+1 }} / {{ activePhotos.length }}</div>
@@ -427,7 +502,6 @@ onMounted(loadData)
             <div class="counter-ovl">No photos</div>
           </div>
 
-          <!-- Δεξιά: στοιχεία -->
           <dl class="sight-details">
             <div><dt>Reporter</dt><dd>{{ getSightingReporter(activeSighting) }}</dd></div>
             <div><dt>Confidence</dt><dd>{{ activeSighting?.confidenceIndex || '—' }}</dd></div>
@@ -440,11 +514,6 @@ onMounted(loadData)
               <dd v-else>—</dd>
             </div>
             <div v-if="activeSighting?.notes"><dt>Notes</dt><dd>{{ activeSighting?.notes }}</dd></div>
-
-            <template v-if="activeSightingId">
-              <div v-if="sightingDetailsLoading[String(activeSightingId)]"><dt>Details</dt><dd>Loading…</dd></div>
-              <div v-else-if="sightingDetailsError[String(activeSightingId)]"><dt>Details</dt><dd class="err">{{ sightingDetailsError[String(activeSightingId)] }}</dd></div>
-            </template>
           </dl>
         </div>
       </figure>
@@ -469,14 +538,39 @@ onMounted(loadData)
 .by { color:#0b2e55; font-weight:900; }
 .username { color:#164a8a; font-size: 20px;}
 .dot { opacity:.6; }
+.sep-dot { margin: 0 6px; opacity:.6; }
 .id { color:#64748b; font-size:13px; }
+
+.right { display:flex; align-items:center; gap:8px; }
+.owner-actions { display:flex; gap:8px; }
+
 .btn{
   height:40px; padding:0 14px; border-radius:10px; border:2px solid #164a8a; background:#164a8a;
   color:#fff; font-weight:800; cursor:pointer; transition: transform .12s ease, filter .15s ease;
 }
 .btn:hover{ filter:brightness(1.04); transform:translateY(-1px); }
+.btn[disabled]{ opacity:.65; cursor:not-allowed; transform:none; }
 
-/* ---------- Photos section (ίδιο με Found) ---------- */
+/* owner buttons */
+.btn.green { background:#16a34a; border-color:#16a34a; }
+.btn.red   { background:#b42318; border-color:#b42318; }
+
+/* ---------- Status chip δίπλα από timestamp ---------- */
+.status-chip{
+  display:inline-block;
+  padding:5px 12px;
+  border-radius:999px;
+  font-size:14px;
+  font-weight:900;
+  border:1px solid #c9d7ef;
+  background:#eef2ff;
+  color:#1d2b50;
+}
+.status-chip[data-status="RETURNED_HOME"]{ background:#e8f7ef; border-color:#bfe7cf; color:#114b2d; }
+.status-chip[data-status="CANCELLED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
+.status-chip[data-status="ACTIVE"]{ background:#eef2ff; border-color:#c9d7ef; color:#1d2b50; }
+
+/* ---------- Photos section ---------- */
 .images { margin: 10px 0 16px; }
 .images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
@@ -550,7 +644,7 @@ dd { margin:0; color:#1f3660; }
 .nav.prev { left:18px; }
 .nav.next { right:18px; }
 
-/* ---------- Sighting overlay (light UI, 50% viewport) ---------- */
+/* ---------- Sighting overlay ---------- */
 .overlay.sighting-ovl { background: rgba(16, 74, 138, 0.12); backdrop-filter: blur(2px); }
 .overlay.sighting-ovl .close { color:#103c70; }
 
@@ -577,7 +671,7 @@ dd { margin:0; color:#1f3660; }
 .sight-photos{ position:relative; height:100%; border:1px solid rgba(0,0,0,.06); border-radius:10px; background:#f2f6fd; overflow:hidden; }
 .sight-photos .photo{ width:100%; height:100%; object-fit:contain; background:#eef4ff; }
 
-/* Βελάκια πάνω στην εικόνα */
+/* Βελάκια */
 .viewer.sighting .nav.in-image{
   position:absolute; top:50%; transform:translateY(-50%);
   width:42px; height:42px; border-radius:999px;
@@ -595,11 +689,7 @@ dd { margin:0; color:#1f3660; }
   padding:4px 8px; border-radius:999px; font-weight:700; color:#103c70; box-shadow:0 2px 10px rgba(0,0,0,.06);
 }
 
-/* Empty state */
-.sight-photos.empty{ display:flex; align-items:center; justify-content:center; }
-.sight-photos.empty .counter-ovl{ bottom:12px; }
-
-/* Στοιχεία panel – χωρίς box */
+/* Στοιχεία panel */
 .sight-details{
   height: 100%;
   border: none; border-radius: 0; background: transparent; padding: 0;

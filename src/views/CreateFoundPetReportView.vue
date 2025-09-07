@@ -1,7 +1,7 @@
 <!-- src/views/CreateFoundPetReportView.vue -->
 <script setup>
 /* global google */
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 
@@ -16,10 +16,20 @@ const loading  = ref(false)
 const errorMsg = ref('')
 const okMsg    = ref('')
 
-// ----- Enums -----
-const SPECIES_OPTIONS = ['DOG','CAT','OTHER']
+// ----- Enums (UI shows Title Case; values stay UPPERCASE for API) -----
+const SPECIES_OPTIONS = ['DOG', 'CAT']
 const SIZE_OPTIONS    = ['SMALL','MEDIUM','LARGE','EXTRA_LARGE']
 const GENDER_OPTIONS  = ['MALE','FEMALE']
+
+// UI label helper (SMALL -> "Small", EXTRA_LARGE -> "Extra Large")
+function titleCaseEnum(v) {
+  if (!v) return ''
+  return String(v)
+    .toLowerCase()
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
 
 // ----- Form model (FoundPetReportCreateDTO) -----
 const form = ref({
@@ -46,7 +56,7 @@ const form = ref({
 // UI-only helper
 const nameOnCollar = ref(null) // true | false | null
 
-// ===== Breed data & combobox (identical logic to AddPetView, adjusted to show manual field BELOW) =====
+// ===== Breeds (native select) =====
 const breeds = ref({ DOG: [], CAT: [] })
 async function loadBreeds() {
   const readTxt = async (url) => {
@@ -55,7 +65,7 @@ async function loadBreeds() {
       if (!res.ok) return []
       const txt = await res.text()
       return txt
-        .split('\\n')
+        .split('\n')
         .map(s => s.trim())
         .filter(s => s.length > 0 && !s.startsWith('#'))
     } catch { return [] }
@@ -68,54 +78,21 @@ async function loadBreeds() {
 }
 onMounted(loadBreeds)
 
-const breedQuery = ref('')
-const showBreedMenu = ref(false)
-const breedWrapEl = ref(null)
-
-// Include "Other" as option at the end
 const availableBreeds = computed(() => {
-  const list = form.value.species === 'DOG' ? breeds.value.DOG
-    : form.value.species === 'CAT' ? breeds.value.CAT
-      : []
-  return [...list, 'Other']
-})
-const filteredBreeds = computed(() => {
-  const q = breedQuery.value.trim().toLowerCase()
-  if (!q) return availableBreeds.value
-  return availableBreeds.value.filter(b => b.toLowerCase().includes(q))
+  const list =
+    form.value.species === 'DOG' ? breeds.value.DOG :
+      form.value.species === 'CAT' ? breeds.value.CAT : []
+  return list.length ? [...list, 'Other'] : []
 })
 
-function pickBreed(b) {
-  form.value.breed = b
-  breedQuery.value = b
-  showBreedMenu.value = false
-}
-
-// Reset when species changes
-watch(() => form.value.species, () => {
-  showBreedMenu.value = false
-  form.value.breed = ''
-  breedQuery.value = ''
-  customBreed.value = ''
-})
-
-// Keep query synced
-watch(() => form.value.breed, (v) => {
-  if (v && v !== breedQuery.value) breedQuery.value = v
-})
-
-// Click-outside to close menu
-function onDocClick(e){
-  const el = breedWrapEl.value
-  if (!el) return
-  if (!el.contains(e.target)) showBreedMenu.value = false
-}
-onMounted(() => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
-
-// Manual breed when Breed = Other
 const customBreed = ref('')
 const isOtherBreed = computed(() => form.value.breed === 'Other')
+
+// reset breed when species changes
+watch(() => form.value.species, () => {
+  form.value.breed = ''
+  customBreed.value = ''
+})
 
 // ----- Google Maps / Places -----
 const mapEl = ref(null)
@@ -199,7 +176,7 @@ async function onSubmit(){
   errorMsg.value = ''
   okMsg.value = ''
 
-  // Frontend validation
+  // Validation
   if (!form.value.address || form.value.latitude == null || form.value.longitude == null){
     errorMsg.value = 'Please fill address and select a location on the map.'
     return
@@ -233,7 +210,7 @@ async function onSubmit(){
     return
   }
 
-  // Build payload (FoundPetReportCreateDTO)
+  // Payload
   const payload = {
     dateTimeFound: toLocalDateTime(form.value.dateTimeFound),
     address: form.value.address,
@@ -274,7 +251,6 @@ async function onSubmit(){
     const data = await res.json().catch(() => null)
     if (data?.id != null) newId = data.id
     if (!newId) {
-      // fallback: if server sends Location header
       const loc = res.headers.get('Location')
       const m = loc && loc.match(/\/found-pet-reports\/(\d+)/)
       if (m) newId = Number(m[1])
@@ -308,13 +284,11 @@ async function onSubmit(){
       <form class="grid" @submit.prevent="onSubmit">
         <!-- Left column: fields -->
         <div class="col fields">
-          <!-- Date & time found (optional) -->
           <label class="field">
             <span>Date & time found (optional)</span>
             <input v-model="form.dateTimeFound" type="datetime-local" />
           </label>
 
-          <!-- Address + autocomplete -->
           <label class="field">
             <span>Address <b class="req">*</b></span>
             <input
@@ -331,7 +305,6 @@ async function onSubmit(){
             <span>lng: <b>{{ coords.lng }}</b></span>
           </div>
 
-          <!-- Holding pet? -->
           <fieldset class="field">
             <span>Are you temporarily keeping the pet? <b class="req">*</b></span>
             <div class="choices">
@@ -340,13 +313,11 @@ async function onSubmit(){
             </div>
           </fieldset>
 
-          <!-- Notes -->
           <label class="field">
             <span>Notes (optional)</span>
             <textarea v-model="form.notes" rows="3" />
           </label>
 
-          <!-- Separator -->
           <div class="sep">Pet description</div>
 
           <!-- Species -->
@@ -354,48 +325,20 @@ async function onSubmit(){
             <span>Species <b class="req">*</b></span>
             <select v-model="form.species" required>
               <option disabled :value="null">Select…</option>
-              <option v-for="s in SPECIES_OPTIONS" :key="s" :value="s">{{ s }}</option>
+              <option v-for="s in SPECIES_OPTIONS" :key="s" :value="s">{{ titleCaseEnum(s) }}</option>
             </select>
           </label>
 
-          <!-- Breed (searchable dropdown) -->
-          <div class="field breed-field" ref="breedWrapEl">
+          <!-- Breed (native select; only when species selected) -->
+          <label class="field" v-if="form.species==='DOG' || form.species==='CAT'">
             <span>Breed <b class="req">*</b></span>
+            <select v-model="form.breed" required>
+              <option disabled value="">Select…</option>
+              <option v-for="b in availableBreeds" :key="b" :value="b">{{ b }}</option>
+            </select>
+          </label>
 
-            <div class="combo">
-              <input
-                class="combo-input"
-                v-model="breedQuery"
-                type="text"
-                placeholder="Search breed…"
-                @focus="showBreedMenu = true"
-                @input="showBreedMenu = true"
-                :aria-expanded="showBreedMenu ? 'true' : 'false'"
-                autocomplete="off"
-                required
-              />
-              <button
-                type="button"
-                class="combo-caret"
-                @click="showBreedMenu = !showBreedMenu"
-                aria-label="Toggle breed list"
-              >▾</button>
-            </div>
-
-            <ul v-show="showBreedMenu" class="menu" role="listbox">
-              <li
-                v-for="b in filteredBreeds"
-                :key="b"
-                class="item"
-                role="option"
-                @mousedown.prevent="pickBreed(b)"
-                @click="pickBreed(b)"
-              >{{ b }}</li>
-              <li v-if="filteredBreeds.length === 0" class="empty-item">No matches</li>
-            </ul>
-          </div>
-
-          <!-- Insert breed manually (only when Breed=Other). Appears directly UNDER breed -->
+          <!-- Manual breed UNDER select when "Other" -->
           <label class="field" v-if="isOtherBreed">
             <span>Insert breed manually <b class="req">*</b></span>
             <input
@@ -405,31 +348,27 @@ async function onSubmit(){
             />
           </label>
 
-          <!-- Color -->
           <label class="field">
             <span>Color <b class="req">*</b></span>
             <input v-model.trim="form.color" required placeholder="e.g. Black, Brown/White…" />
           </label>
 
-          <!-- Size -->
           <label class="field">
             <span>Size <b class="req">*</b></span>
             <select v-model="form.size" required>
               <option disabled :value="null">Select…</option>
-              <option v-for="s in SIZE_OPTIONS" :key="s" :value="s">{{ s }}</option>
+              <option v-for="s in SIZE_OPTIONS" :key="s" :value="s">{{ titleCaseEnum(s) }}</option>
             </select>
           </label>
 
-          <!-- Gender -->
           <label class="field">
             <span>Gender <b class="req">*</b></span>
             <select v-model="form.gender" required>
               <option disabled :value="null">Select…</option>
-              <option v-for="g in GENDER_OPTIONS" :key="g" :value="g">{{ g }}</option>
+              <option v-for="g in GENDER_OPTIONS" :key="g" :value="g">{{ titleCaseEnum(g) }}</option>
             </select>
           </label>
 
-          <!-- Collar -->
           <fieldset class="field">
             <span>Did the pet wear a collar? <b class="req">*</b></span>
             <div class="choices">
@@ -438,7 +377,6 @@ async function onSubmit(){
             </div>
           </fieldset>
 
-          <!-- Collar color (required if hasCollar === true) -->
           <label class="field" v-if="form.hasCollar === true">
             <span>Collar color <b class="req">*</b></span>
             <input
@@ -448,7 +386,6 @@ async function onSubmit(){
             />
           </label>
 
-          <!-- Name on collar? (UI-only) -->
           <fieldset class="field" v-if="form.hasCollar === true">
             <span>Is there a name on it?</span>
             <div class="choices">
@@ -457,7 +394,6 @@ async function onSubmit(){
             </div>
           </fieldset>
 
-          <!-- Name (required if nameOnCollar === true) -->
           <label class="field" v-if="form.hasCollar === true && nameOnCollar === true">
             <span>Name <b class="req">*</b></span>
             <input
@@ -467,7 +403,6 @@ async function onSubmit(){
             />
           </label>
 
-          <!-- Behavior -->
           <label class="field">
             <span>Behavior (optional)</span>
             <textarea v-model="form.approximateBehavior" rows="3" placeholder="e.g. Friendly but timid around strangers…" />
@@ -534,32 +469,7 @@ input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0
 .alert.err { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 .alert.ok  { background:#e8f6ee; color:#0f5132; border:1px solid #badbcc; }
 
-/* Breed combobox (overlay dropdown) — force vertical stacked items */
-.breed-field { position: relative; }
-.combo{ position:relative; display:flex; align-items:center; }
-.combo-input{
-  flex:1; height:44px; padding-right:34px;
-  border-radius:12px; border:1px solid rgba(0,0,0,.14); font-size:16px; outline:none;
-}
-.combo-input:focus{ border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
-.combo-caret{
-  position:absolute; right:6px; top:50%; transform:translateY(-50%);
-  height:32px; min-width:32px; border-radius:8px;
-  border:1px solid rgba(0,0,0,.14); background:#fff; z-index:1001; cursor:pointer;
-}
-.menu{
-  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:1000;
-  margin:0; padding:6px; border:1px solid rgba(0,0,0,.14); border-radius:12px; background:#fff;
-  box-shadow:0 12px 28px rgba(16,60,112,.16);
-  max-height:224px; overflow:auto; list-style:none;
-}
-.menu .item{
-  display:block;               /* ensures vertical stacking even if a global reset sets li inline */
-  padding:8px 10px; border-radius:8px; cursor:pointer; white-space:normal;
-}
-.menu .item:hover{ background:#f3f7ff; }
-.empty-item{ padding:8px 10px; color:#64748b; }
-
+/* (Καμία combobox κλάση πλέον — όλα native selects) */
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .map, .map-fallback { height: 260px; }

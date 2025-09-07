@@ -84,7 +84,16 @@ const router = createRouter({
       path: '/about',
       name: 'about',
       component: () => import('@/views/AboutView.vue'),
-    }
+    },
+    {
+      path: '/adopt',
+      name: 'adopt',
+      component: () => import('@/views/AdoptionView.vue'),
+    },
+    { path: '/found-pet/:id',
+      name: 'found-pet',
+      component: () => import('../views/FoundPetForAdoptionView.vue')
+    },
 
 
 

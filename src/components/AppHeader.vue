@@ -15,7 +15,6 @@ const { data, error, loading, performRequest } = useRemoteData(urlRef, authRef)
 
 const notifications = computed(() => {
   if (!Array.isArray(data.value)) return []
-  // Ταξινόμηση φθίνουσα (πιο νέο πρώτο)
   return [...data.value].sort((a, b) => {
     const da = new Date(a.timestamp).getTime()
     const db = new Date(b.timestamp).getTime()
@@ -27,7 +26,7 @@ const unreadCount = computed(() => notifications.value.filter(n => n.read === fa
 function toggleNotifications () {
   notifOpen.value = !notifOpen.value
   if (notifOpen.value) {
-    loading.value = true   // το composable σου δεν το κάνει μόνο του
+    loading.value = true
     performRequest()
   }
 }
@@ -50,6 +49,20 @@ function timeAgo (iso) {
 function onKey (e) { if (e.key === 'Escape') closeNotifications() }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
+
+/* -------- Helper για link κάθε notification -------- */
+function notificationLink(n) {
+  if (n.lostPetReportId) {
+    return `/lost/${n.lostPetReportId}`
+  }
+  if (n.foundPetReportId) {
+    return `/found/${n.foundPetReportId}`
+  }
+  if (n.foundPetId) {
+    return `/found-pet/${n.foundPetId}`
+  }
+  return '/' // fallback
+}
 </script>
 
 <template>
@@ -66,6 +79,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <nav class="nav">
           <RouterLink to="/"        class="nav-link">Home</RouterLink>
           <RouterLink to="/search"  class="nav-link">Search</RouterLink>
+          <RouterLink to="/adopt"   class="nav-link">Adopt</RouterLink>
           <RouterLink to="/about"   class="nav-link">About&nbsp;Us</RouterLink>
         </nav>
       </div>
@@ -77,7 +91,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </div>
 
       <div class="actions" v-else>
-        <!-- ΝΕΟ: Notifications button -->
+        <!-- Notifications button -->
         <button class="icon-btn" @click="toggleNotifications" aria-label="Notifications">
           <!-- Bell -->
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -105,12 +119,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <div v-if="loading" class="loading">Loading…</div>
           <div v-else-if="error" class="error">Failed to load notifications.</div>
           <ul v-else-if="notifications.length" class="notif-list">
-            <li v-for="n in notifications" :key="n.id" class="notif-item" :class="{ unread: n.read === false }">
-              <div class="row1">
-                <span class="type">{{ n.type }}</span>
-                <time class="ago">{{ timeAgo(n.timestamp) }}</time>
-              </div>
-              <p class="msg" :title="n.message">{{ n.message || '—' }}</p>
+            <li
+              v-for="n in notifications"
+              :key="n.id"
+              class="notif-item"
+              :class="{ unread: n.read === false }"
+            >
+              <RouterLink :to="notificationLink(n)" class="notif-link" @click="closeNotifications">
+                <div class="row1">
+                  <span class="type">{{ n.type }}</span>
+                  <time class="ago">{{ timeAgo(n.timestamp) }}</time>
+                </div>
+                <p class="msg" :title="n.message">{{ n.message || '—' }}</p>
+              </RouterLink>
             </li>
           </ul>
           <div v-else class="empty">No notifications yet.</div>
@@ -227,5 +248,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .ago{ color:#6b7b91; font-size:12px; }
 .msg{
   margin:6px 0 0; color:#0f1b2d; line-height:1.4; max-height:3.6em; overflow:hidden; text-overflow:ellipsis;
+}
+
+.notif-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.notif-link:hover .msg {
+  text-decoration: underline;
 }
 </style>

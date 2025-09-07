@@ -1,33 +1,19 @@
-<!-- ReportListRow.vue -->
+
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useApplicationStore } from '@/stores/application.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
   type: { type: String, required: true }, // "lost" | "found"
 })
 
-const backend = import.meta.env.VITE_BACKEND
-const store   = useApplicationStore()
-
-/* ---------- Pet / Images ---------- */
-const petId = computed(() => props.type === 'lost' ? (props.item?.pet ?? props.item?.petId) : null)
-const pet   = ref(null)
-
+/* ---------- Images (from DTO) ---------- */
 const images = computed(() => {
-  if (props.type === 'lost') {
-    const fromItem = Array.isArray(props.item?.imagePresignedUrls) ? props.item.imagePresignedUrls : null
-    if (fromItem?.length) return fromItem
-    const arr = pet.value?.presignedImageUrls
-      || pet.value?.imagePresignedUrls
-      || pet.value?.imageUrls
-    return Array.isArray(arr) ? arr : []
-  }
-  const arr = props.item?.imagePresignedUrls
-    || props.item?.imageUrls
-    || props.item?.images
+  const arr =
+    (Array.isArray(props.item?.imagePresignedUrls) && props.item.imagePresignedUrls.length
+      ? props.item.imagePresignedUrls
+      : props.item?.imageUrls) || []
   return Array.isArray(arr) ? arr : []
 })
 const mainImage = computed(() => {
@@ -35,8 +21,21 @@ const mainImage = computed(() => {
   return (typeof u === 'string' && u.trim().length) ? u : null
 })
 
-const petName = computed(() => pet.value?.name || '')
+/* ---------- Pet fields (from DTO) ---------- */
+const petName = computed(() => props.item?.petName || '')
 const showPetName = computed(() => props.type === 'lost' && !!petName.value)
+
+// Description: size, color, species από το ίδιο DTO
+const norm = v => (typeof v === 'string' ? v.trim() : '')
+const description = computed(() => {
+  const parts = [
+    norm(props.item?.size),
+    norm(props.item?.color),
+    norm(String(props.item?.species ?? ''))
+  ].filter(Boolean)
+  return parts.length ? parts.join(', ') : '—'
+})
+const hasDescription = computed(() => description.value !== '—')
 
 /* ---------- Meta ---------- */
 const formattedWhen = computed(() => {
@@ -45,49 +44,26 @@ const formattedWhen = computed(() => {
 })
 const address = computed(() => props.item?.address || '—')
 
+// Lost DTO έχει owner (username)
 const reporterUsername = computed(() => {
   const it = props.item || {}
-  return it.reporterUsername
+  return it.owner
+    || it.reporterUsername
     || it.reporter
     || it.ownerUsername
-    || it.owner
     || it.createdByUsername
     || it.user?.username
     || '—'
 })
-
-/* ---------- Description (Size, Color, Species) ---------- */
-const norm = v => (typeof v === 'string' ? v.trim() : '')
-const pickField = key => {
-  return props.type === 'lost'
-    ? norm(pet.value?.[key] ?? props.item?.[key])
-    : norm(props.item?.[key] ?? pet.value?.[key])
-}
-const description = computed(() => {
-  const parts = [pickField('size'), pickField('color'), pickField('species')].filter(Boolean)
-  return parts.length ? parts.join(', ') : '—'
-})
-const hasDescription = computed(() => description.value !== '—')
 
 /* ---------- Routing ---------- */
 const detailsTo = computed(() =>
   props.type === 'lost' ? `/lost/${props.item.id}` : `/found/${props.item.id}`
 )
 
-/* ---------- Fallback ---------- */
+/* ---------- Fallback image ---------- */
 const FALLBACK = '/no-image.jpg'
 function onImgError(e){ e.target.src = FALLBACK }
-
-/* ---------- Fetch pet only if χρειάζεται ---------- */
-onMounted(async () => {
-  if (!petId.value) return
-  try {
-    const headers = { Accept: 'application/json' }
-    if (store?.userData?.accessToken) headers.Authorization = `Bearer ${store.userData.accessToken}`
-    const res = await fetch(`${backend}/api/pets/${petId.value}`, { headers })
-    if (res.ok) pet.value = await res.json()
-  } catch {/* ignore */}
-})
 </script>
 
 <template>
@@ -100,7 +76,6 @@ onMounted(async () => {
 
     <!-- ΔΕΞΙΑ: 60% — στοιχεία -->
     <div class="right">
-      <!-- ΚΕΝΤΡΑΡΙΣΜΕΝΟΣ ΤΙΤΛΟΣ ΠΑΝΩ-ΠΑΝΩ -->
       <h3 class="title">
         <div class="title-heading">
           <span class="title-chip">
@@ -111,7 +86,6 @@ onMounted(async () => {
         <div class="title-by">by <b class="username">{{ reporterUsername }}</b></div>
       </h3>
 
-      <!-- ΚΑΘΕ στοιχείο σε ΔΙΚΗ του ΓΡΑΜΜΗ -->
       <div class="meta">
         <div v-if="showPetName" class="line">
           <span class="label">Pet name:</span>
@@ -190,7 +164,7 @@ onMounted(async () => {
   width:55%;
   display:flex;
   flex-direction:column;
-  justify-content:flex-start;      /* τίτλος ψηλά */
+  justify-content:flex-start;
   gap:12px;
   padding-top:4px;
 }
@@ -210,8 +184,6 @@ onMounted(async () => {
   justify-content:center;
   gap:8px;
 }
-
-/* title-chip: γαλάζιο/γκρι περίγραμμα γύρω από το “Found/Lost pet report” */
 .title-chip{
   display:inline-block;
   padding:6px 12px;
@@ -223,7 +195,6 @@ onMounted(async () => {
   font-size: clamp(16px, 2vw, 20px);
   line-height:1;
 }
-
 .title-id{ color:#64748b; font-weight:800; font-size: clamp(14px, 1.6vw, 18px); }
 .title-by{ color:#0b2e55; font-weight:900; font-size:12px; }
 .username{ color:#164a8a; font-size:12px; }
