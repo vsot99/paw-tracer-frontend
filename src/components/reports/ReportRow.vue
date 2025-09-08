@@ -124,6 +124,9 @@ function onImgError(e) { e.target.src = FALLBACK }
   min-height: 260px;
 
   width: 100%; /* <-- πιάνει όλο το 50% της στήλης */
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 100%;
 }
 
 /* Αριστερά */
@@ -159,6 +162,7 @@ function onImgError(e) { e.target.src = FALLBACK }
   justify-content: flex-start;
   gap: 12px;
   padding-top: 4px;
+  min-width: 0;
 }
 
 /* Τίτλος */

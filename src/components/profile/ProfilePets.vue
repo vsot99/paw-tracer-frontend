@@ -40,7 +40,6 @@ function onImgError(e) {
       <h2 class="h">My pets</h2>
       <div class="actions">
         <button class="btn" @click="addPet">Add Pet</button>
-        <button class="btn ghost" @click="performRequest" :disabled="loading">Refresh</button>
       </div>
     </div>
 

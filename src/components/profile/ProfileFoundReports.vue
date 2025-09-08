@@ -20,9 +20,6 @@ const items = computed(() => Array.isArray(data.value) ? data.value : [])
   <section>
     <div class="head">
       <h2 class="h">My found pet reports</h2>
-      <div class="actions">
-        <button class="btn ghost" @click="refresh" :disabled="loading">Refresh</button>
-      </div>
     </div>
 
     <p v-if="error" class="err">{{ String(error) }}</p>

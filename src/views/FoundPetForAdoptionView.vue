@@ -35,6 +35,7 @@ const report = ref({
   gender: '',
   name: '',
   approximateBehavior: '',
+  status: 'ACTIVE',
 
   // images (presigned)
   imagePresignedUrls: []
@@ -44,7 +45,24 @@ const report = ref({
 const currentUsername = computed(() => app?.userData?.username || app?.userData?.user?.username || '')
 const ownerUsername = computed(() => report.value.user || report.value.reporter || '')
 const isOwner = computed(() => !!currentUsername.value && !!ownerUsername.value && currentUsername.value === ownerUsername.value)
-const canCreateRequest = computed(() => !!currentUsername.value && !!ownerUsername.value && currentUsername.value !== ownerUsername.value)
+// ✅ μόνο για logged-in, όχι owner, και status = FOR_ADOPTION
+const statusRaw = computed(() => String(report.value?.status || '').toUpperCase())
+const humanStatus = computed(() => {
+  switch (statusRaw.value) {
+    case 'RETURNED_HOME': return 'Returned home'
+    case 'CANCELLED':     return 'Cancelled'
+    case 'FOR_ADOPTION':  return 'For adoption'
+    case 'ACTIVE':        return 'Active'
+    default:              return report.value?.status || '—'
+  }
+})
+
+const canCreateRequest = computed(() =>
+  !!currentUsername.value &&
+  !!ownerUsername.value &&
+  currentUsername.value !== ownerUsername.value &&
+  statusRaw.value === 'FOR_ADOPTION'
+)
 
 /* ------------- Images ------------- */
 const FALLBACK = '/no-image.jpg'
@@ -94,6 +112,7 @@ async function fetchItem() {
       address: data.address ?? '',
       latitude: data.latitude ?? null,
       longitude: data.longitude ?? null,
+      status: data.status ?? 'ACTIVE',
 
       id: data.id ?? id.value,
       species: data.species ?? '',
@@ -258,6 +277,11 @@ async function actOnRequest(reqId, action){ // 'approve' | 'reject'
           <span v-if="report?.dateTimeFound" class="sep-dot">•</span>
           <span v-if="report?.dateTimeFound" class="when">
             {{ String(report.dateTimeFound).replace('T',' ').slice(0,16) }}
+          </span>
+
+          <span v-if="report?.status" class="sep-dot">•</span>
+          <span v-if="report?.status" class="status-chip" :data-status="statusRaw">
+           {{ humanStatus }}
           </span>
         </div>
 
@@ -582,6 +606,22 @@ textarea:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12);
 }
 .status[data-status="APPROVED"]{ background:#e8f7ef; border-color:#bfe7cf; color:#114b2d; }
 .status[data-status="REJECTED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
+
+/* CHIP δίπλα στο timestamp */
+.status-chip{
+  display:inline-block;
+  padding:5px 12px;
+  border-radius:999px;
+  font-size:14px;
+  font-weight:900;
+  border:1px solid #c9d7ef;
+  background:#eef2ff;   /* default (ACTIVE-like) */
+  color:#1d2b50;
+}
+.status-chip[data-status="ACTIVE"]{ background:#eef2ff; border-color:#c9d7ef; color:#1d2b50; }
+.status-chip[data-status="FOR_ADOPTION"]{ background:#ffedd5; border-color:#fdba74; color:#9a3412; }
+.status-chip[data-status="RETURNED_HOME"]{ background:#e8f7ef; border-color:#bfe7cf; color:#114b2d; }
+.status-chip[data-status="CANCELLED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
 
 @media (max-width: 1000px){
   .grid-main { grid-template-columns: 1fr; grid-template-areas:

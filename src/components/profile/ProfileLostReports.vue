@@ -20,9 +20,6 @@ const items = computed(() => Array.isArray(data.value) ? data.value : [])
   <section>
     <div class="head">
       <h2 class="h">My lost pet reports</h2>
-      <div class="actions">
-        <button class="btn ghost" @click="refresh" :disabled="loading">Refresh</button>
-      </div>
     </div>
 
     <p v-if="error" class="err">{{ String(error) }}</p>
@@ -53,6 +50,8 @@ const items = computed(() => Array.isArray(data.value) ? data.value : [])
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  padding: 4px;
+  allign-items: stretch;
 }
 
 /* Κινητό: πέφτει σε 1 ανά σειρά */
