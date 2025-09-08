@@ -17,19 +17,16 @@ const id = computed(() => Number(route.params.id))
 const loading  = ref(true)
 const errorMsg = ref('')
 
-/** FoundPetResponseDTO (που γυρνάς από /api/adoption/found-pets/:id)
- *  user (ή reporter), dateTimeFound, address, latitude, longitude,
- *  id, species, breed, color, size, gender, name, approximateBehavior, imagePresignedUrls
- */
+/** FoundPetResponseDTO from /api/adoption/found-pets/:id */
 const report = ref({
-  // user details
-  user: '',               // μπορεί να έρθει ως 'reporter' — δες ownerUsername κάτω
+  // user / context
+  user: '',               // ή reporter
   dateTimeFound: '',
   address: '',
   latitude: null,
   longitude: null,
 
-  // pet details
+  // pet
   id: null,
   species: '',
   breed: '',
@@ -39,20 +36,17 @@ const report = ref({
   name: '',
   approximateBehavior: '',
 
-  // images
+  // images (presigned)
   imagePresignedUrls: []
 })
 
 /* ------------ Owner / Viewer logic ------------- */
 const currentUsername = computed(() => app?.userData?.username || app?.userData?.user?.username || '')
-const ownerUsername = computed(() => {
-  // στήριξη και για 'reporter' αν το backend το ονομάζει έτσι
-  return report.value.user || report.value.reporter || ''
-})
+const ownerUsername = computed(() => report.value.user || report.value.reporter || '')
 const isOwner = computed(() => !!currentUsername.value && !!ownerUsername.value && currentUsername.value === ownerUsername.value)
 const canCreateRequest = computed(() => !!currentUsername.value && !!ownerUsername.value && currentUsername.value !== ownerUsername.value)
 
-/* ------------- Images (ίδιο λογικό με FoundPetReportView) ------------- */
+/* ------------- Images ------------- */
 const FALLBACK = '/no-image.jpg'
 const images = computed(() => Array.isArray(report.value.imagePresignedUrls) ? report.value.imagePresignedUrls : [])
 function onImgError(e){ e.target.src = FALLBACK }
@@ -72,6 +66,13 @@ function onKey(e){
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
+
+/* ---------- helper για enums -> First capital only ---------- */
+function humanizeEnum(val){
+  if (val == null) return ''
+  const s = String(val).replace(/_/g, ' ').trim().toLowerCase()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+}
 
 /* ---------------- Fetch FoundPet item ---------------- */
 async function fetchItem() {
@@ -112,7 +113,6 @@ async function fetchItem() {
     }
   } catch (e) {
     errorMsg.value = e?.message || 'Failed to load adoption item.'
-    // για debugging:
     console.error('fetchItem error:', e)
   } finally {
     loading.value = false
@@ -172,7 +172,7 @@ async function submitCreate(){
     const res = await fetch(`${backend}/api/adoption/found-pets/${id.value}/adoption-requests/create`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ message: createMsg.value || null }) // μόνο το message χρειάζεται
+      body: JSON.stringify({ message: createMsg.value || null })
     })
     if (!res.ok) {
       const t = await res.text().catch(()=> '')
@@ -210,9 +210,6 @@ async function fetchRequests(){
       const t = await res.text().catch(()=> '')
       throw new Error(t || `HTTP ${res.status}`)
     }
-    /** Περιμένουμε Array<AdoptionRequestResponseDTO>:
-     *  { id, message, status, timestamp, requesterUsername }
-     */
     adoptionRequests.value = await res.json()
   } catch (e){
     errorMsg.value = e?.message || 'Failed to load adoption requests.'
@@ -222,7 +219,7 @@ async function fetchRequests(){
   }
 }
 
-async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
+async function actOnRequest(reqId, action){ // 'approve' | 'reject'
   if (!isOwner.value) return
   requestsBusy.value = true
   errorMsg.value = ''
@@ -250,12 +247,14 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
 <template>
   <main class="found-view">
     <section class="wrap">
+      <!-- HEADER -->
       <header class="head-top">
         <div class="left">
-          <h1 class="title">Adoption item</h1>
+          <h1 class="title">Found pet for adoption</h1>
           <span class="id">#{{ report.id }}</span>
           <span class="dot">·</span>
           <span class="by">by <b class="username">{{ ownerUsername || '—' }}</b></span>
+
           <span v-if="report?.dateTimeFound" class="sep-dot">•</span>
           <span v-if="report?.dateTimeFound" class="when">
             {{ String(report.dateTimeFound).replace('T',' ').slice(0,16) }}
@@ -263,82 +262,60 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
         </div>
 
         <div class="right-actions">
-          <button
-            v-if="canCreateRequest"
-            class="btn"
-            @click="openCreate"
-          >
-            Create adoption request
-          </button>
-
-          <button
-            v-if="isOwner"
-            class="btn ghost"
-            @click="openRequests"
-          >
-            View adoption requests
-          </button>
+          <button v-if="canCreateRequest" class="btn" @click="openCreate">Create adoption request</button>
+          <button v-if="isOwner" class="btn ghost" @click="openRequests">View adoption requests</button>
         </div>
       </header>
 
       <p v-if="errorMsg" class="alert err">{{ errorMsg }}</p>
       <p v-else-if="loading" class="alert info">Loading…</p>
 
-      <!-- SECTION: IMAGES (ίσιο grid τετράγωνων) -->
-      <section class="images">
-        <div class="head">
-          <h2 class="h">Images</h2>
-        </div>
+      <!-- 2×2 GRID (ίδιο στυλ με FoundPetReportView) -->
+      <div class="grid-main">
+        <!-- row1 col1: IMAGES -->
+        <section class="panel panel-images" aria-labelledby="images-h">
+          <h2 class="panel-title">Images</h2>
 
-        <div v-if="images.length" class="grid-squares">
-          <div
-            v-for="(src, i) in images"
-            :key="i"
-            class="square"
-            @click="openLightbox(i)"
-            :title="'Open image '+(i+1)"
-          >
-            <img :src="src || FALLBACK" alt="" @error="onImgError" />
+
+          <div v-if="images.length" class="grid-squares">
+            <div
+              v-for="(src, i) in images"
+              :key="i"
+              class="square"
+              @click="openLightbox(i)"
+              :title="'Open image '+(i+1)"
+            >
+              <img :src="src || FALLBACK" alt="" @error="onImgError" />
+            </div>
           </div>
-        </div>
 
-        <div v-else class="images-empty">
-          <div class="empty-box">
-            <img src="/no-image.jpg" alt="" class="empty-icon" />
-            <p class="empty-text">No images uploaded yet.</p>
+          <div v-else class="images-empty">
+            <div class="empty-box">
+              <img src="/no-image.jpg" alt="" class="empty-icon" />
+              <p class="empty-text">No images uploaded yet.</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- LIGHTBOX -->
-      <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox">
-        <button class="lb-btn close" aria-label="Close" @click="closeLightbox">×</button>
-        <button class="lb-btn prev" aria-label="Prev" @click="prevImg">‹</button>
-        <img class="lb-img" :src="images[lightboxIndex] || FALLBACK" alt="" @error="onImgError" />
-        <button class="lb-btn next" aria-label="Next" @click="nextImg">›</button>
-        <div class="lb-count">{{ lightboxIndex+1 }} / {{ images.length }}</div>
-      </div>
-
-      <!-- ΚΑΤΩ GRID: Αριστερά (User + Pet) | Δεξιά (Location) -->
-      <div class="grid">
-        <!-- LEFT PANEL -->
-        <section class="panel panel-left">
+        <!-- row1 col2: USER DETAILS -->
+        <section class="panel panel-report">
           <h2 class="panel-title">User details</h2>
           <div class="kv">
             <div><span class="k">User</span><span class="v">{{ ownerUsername || '—' }}</span></div>
-            <div><span class="k">Date &amp; time found</span><span class="v">{{ report.dateTimeFound ? String(report.dateTimeFound).replace('T',' ').slice(0,16) : '—' }}</span></div>
+            <div><span class="k">Date &amp; Time found</span><span class="v">{{ report.dateTimeFound ? String(report.dateTimeFound).replace('T',' ').slice(0,16) : '—' }}</span></div>
             <div class="full"><span class="k">Address</span><span class="v">{{ report.address || '—' }}</span></div>
           </div>
+        </section>
 
-          <div class="sep"></div>
-
+        <!-- row2 col1: PET DETAILS (humanized) -->
+        <section class="panel panel-left">
           <h2 class="panel-title">Pet details</h2>
           <div class="kv">
             <div v-if="report.name"><span class="k">Name</span><span class="v">{{ report.name }}</span></div>
-            <div><span class="k">Species</span><span class="v">{{ report.species || '—' }}</span></div>
+            <div><span class="k">Species</span><span class="v">{{ humanizeEnum(report.species) || '—' }}</span></div>
             <div><span class="k">Breed</span><span class="v">{{ report.breed || '—' }}</span></div>
-            <div><span class="k">Gender</span><span class="v">{{ report.gender || '—' }}</span></div>
-            <div><span class="k">Size</span><span class="v">{{ report.size || '—' }}</span></div>
+            <div><span class="k">Gender</span><span class="v">{{ humanizeEnum(report.gender) || '—' }}</span></div>
+            <div><span class="k">Size</span><span class="v">{{ humanizeEnum(report.size) || '—' }}</span></div>
             <div><span class="k">Color</span><span class="v">{{ report.color || '—' }}</span></div>
             <div class="full">
               <span class="k">Behavior</span>
@@ -347,13 +324,9 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
           </div>
         </section>
 
-        <!-- RIGHT PANEL: Location -->
+        <!-- row2 col2: LOCATION (μόνο χάρτης) -->
         <section class="panel panel-right">
-          <h2 class="panel-title">Location</h2>
-          <div class="kv">
-            <div><span class="k">Latitude</span><span class="v">{{ report.latitude ?? '—' }}</span></div>
-            <div><span class="k">Longitude</span><span class="v">{{ report.longitude ?? '—' }}</span></div>
-          </div>
+          <h2 class="panel-title">Location found</h2>
           <div class="map-wrap">
             <div v-if="gmapsKey" ref="mapEl" class="map"></div>
             <div v-else class="map-fallback">
@@ -361,6 +334,15 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
             </div>
           </div>
         </section>
+      </div>
+
+      <!-- LIGHTBOX -->
+      <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox">
+        <button class="lb-btn close" aria-label="Close" @click="closeLightbox">×</button>
+        <button class="lb-btn prev" aria-label="Prev" @click="prevImg">‹</button>
+        <img class="lb-img" :src="images[lightboxIndex] || FALLBACK" alt="" @error="onImgError" />
+        <button class="lb-btn next" aria-label="Next" @click="nextImg">›</button>
+        <div class="lb-count">{{ lightboxIndex+1 }} / {{ images.length }}</div>
       </div>
 
       <!-- CREATE REQUEST MODAL -->
@@ -397,11 +379,7 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
             <p v-else-if="!adoptionRequests.length" class="muted">No requests yet.</p>
 
             <div v-else class="req-list">
-              <div
-                v-for="r in adoptionRequests"
-                :key="r.id"
-                class="req-row"
-              >
+              <div v-for="r in adoptionRequests" :key="r.id" class="req-row">
                 <div class="req-main">
                   <div class="req-top">
                     <b class="req-user">@{{ r.requesterUsername || 'unknown' }}</b>
@@ -448,6 +426,7 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
 .by { color:#0b2e55; font-weight:900; }
 .username { color:#164a8a; font-size: 20px;}
 .sep-dot { margin: 0 6px; opacity:.6; }
+
 .alert { margin-top:10px; padding:10px 12px; border-radius:10px; }
 .alert.info { background:#eef5ff; color:#0b2e55; border:1px solid #d5e5ff; }
 .alert.err  { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
@@ -463,24 +442,61 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
 .btn.ghost { background:#fff; color:#164a8a; }
 .btn.danger { background:#b42318; border-color:#b42318; }
 
-/* Images */
-.images { margin: 10px 0 16px; }
-.images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
-
-.grid-squares {
+/* ---------- GRID ΜΕ AREAS (όπως FoundPetReportView) ---------- */
+.grid-main{
   display:grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "images report"
+    "pet    location";
+  gap:16px;
+  align-items: stretch;
+}
+.panel-images   { grid-area: images; }
+.panel-report   { grid-area: report; }
+.panel-left     { grid-area: pet; }
+.panel-right    { grid-area: location; }
+
+/* Panels (ίδια κάρτα) */
+.panel {
+  background:#fff; border:1px solid rgba(0,0,0,.08);
+  border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
+  padding:14px; display:flex; flex-direction:column; min-height: 0;
+}
+.panel-title { margin:2px 0 10px; font-size:18px; font-weight:900; color:#103c70; }
+
+/* Images */
+.images .head, .panel-images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.grid-squares{
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+
   gap:10px;
+
+  /* ΣΤΑΘΕΡΟ ΥΨΟΣ: ~ δεν αλλάζει το section */
+  height: clamp(260px, 42vh, 520px);
 }
-.square {
-  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
-  border-radius:12px; overflow:hidden; aspect-ratio: 1 / 1; cursor: zoom-in;
+
+.square{
+  position:relative;
+  background:#e9f0fb;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:12px;
+  overflow:hidden;
+  /* γεμίζει πλήρως το κελί του grid */
+  width:100%;
+  height:100%;
+  cursor:zoom-in;
 }
-.square img {
-  width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease;
+
+.square img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  transition: transform .25s ease;
 }
-.square:hover img { transform: scale(1.02); }
+.square:hover img{ transform: scale(1.02); }
 
 .images-empty {
   background:#fff; border:1px solid rgba(0,0,0,.08);
@@ -507,16 +523,7 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
 .lb-btn.close{ top: 18px; right: 18px; left: auto; transform:none; width:44px; height:44px; font-size:28px; }
 .lb-count{ position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.55); color:#fff; padding:6px 10px; border-radius:10px; font-weight:800; font-size:12px; }
 
-/* Κάτω grid */
-.grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items: stretch; }
-.panel {
-  background:#fff; border:1px solid rgba(0,0,0,.08);
-  border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
-  padding:14px; display:flex; flex-direction:column; height:100%; min-height: 360px;
-}
-.panel-title { margin:2px 0 10px; font-size:18px; font-weight:900; color:#103c70; }
-.sep { margin:12px 0; border-top:1px dashed rgba(0,0,0,.14); }
-
+/* Key-Value */
 .kv { display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px; }
 .kv .full { grid-column: 1 / -1; }
 .k { display:block; font-size:12px; color:#0b2e55; font-weight:800; opacity:.85; }
@@ -528,7 +535,7 @@ async function actOnRequest(reqId, action){ // action: 'approve' | 'reject'
 .map {
   height: 300px; width: 100%;
   border-radius:12px; border:1px solid rgba(0,0,0,.08);
-  box-shadow:0 8px 20px rgba(16,60,112,.08);
+  box-shadow:0 8px 20px rgba(0,0,0,.08);
 }
 .map-fallback {
   height: 300px; display:grid; place-items:center;
@@ -575,4 +582,13 @@ textarea:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12);
 }
 .status[data-status="APPROVED"]{ background:#e8f7ef; border-color:#bfe7cf; color:#114b2d; }
 .status[data-status="REJECTED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
+
+@media (max-width: 1000px){
+  .grid-main { grid-template-columns: 1fr; grid-template-areas:
+    "images"
+    "report"
+    "pet"
+    "location";
+  }
+}
 </style>

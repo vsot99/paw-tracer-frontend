@@ -1,4 +1,3 @@
-<!-- src/views/LostPetReportView.vue -->
 <script setup>
 /* global google */
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -45,7 +44,7 @@ const isOwner = computed(() =>
 
 /* -------- status helpers -------- */
 const statusRaw = computed(() => String(report.value?.status || '').toUpperCase())
-const isActive  = computed(() => statusRaw.value === 'ACTIVE') // εμφανίζουμε owner buttons μόνο τότε
+const isActive  = computed(() => statusRaw.value === 'ACTIVE')
 const statusText = computed(() => {
   switch (statusRaw.value) {
     case 'RETURNED_HOME': return 'Returned home'
@@ -62,22 +61,41 @@ async function apiGet(url, accept='application/json') {
   return accept === 'application/json' ? res.json() : res.blob()
 }
 
+/* Capitalize μόνο όταν είναι ΟΛΟ κεφαλαία */
+function cap(v){
+  if (v == null) return '—'
+  const s = String(v)
+  const isAllCaps = s && s === s.toUpperCase() && s !== s.toLowerCase()
+  if (!isAllCaps) return s
+  const lower = s.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+/* Confidence ως “Medium”, “Very low”, κλπ */
+function prettyConfidence(conf){
+  if (!conf) return '—'
+  const s = String(conf).toLowerCase().replace(/_/g, ' ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/* -------- Sightings -------- */
 const sightings = ref([])
 const sightingsLoading = ref(false)
 const sightingsError = ref('')
 
-// --- per-sighting details cache (DTO) ---
+// λεπτομέρειες (DTO by id/index)
 const sightingDetails = ref(Object.create(null))
 const sightingDetailsLoading = ref(Object.create(null))
 const sightingDetailsError = ref(Object.create(null))
 
-async function ensureSightingDetails(sightingId){
-  const key = String(sightingId)
+async function ensureSightingDetails(sightingIdx){
+  // με index πλέον
+  const key = String(sightingIdx)
   if (sightingDetails.value[key] || sightingDetailsLoading.value[key]) return
   try{
     sightingDetailsLoading.value[key] = true
-    const dto = await apiGet(`${backend}/api/lost-pet-reports/${id}/sighting-reports/${key}`)
-    sightingDetails.value[key] = dto || {}
+    // Αν έχεις endpoint by id, άστο. Αλλιώς απλά αντιγραφή από την ίδια λίστα:
+    // εδώ δεν έχουμε id, οπότε δεν κάνουμε δεύτερο fetch — κρατάμε την απλή λίστα
+    sightingDetails.value[key] = sightings.value[sightingIdx] || {}
     sightingDetailsError.value[key] = ''
   }catch(e){
     sightingDetailsError.value[key] = e?.message || 'Failed to load sighting details'
@@ -131,7 +149,7 @@ async function changeStatus(newStatus){
     const res = await fetch(`${backend}/api/lost-pet-reports/${id}/status`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify(newStatus) // "RETURNED_HOME" ή "CANCELLED"
+      body: JSON.stringify(newStatus)
     })
     if (!res.ok){
       const t = await res.text().catch(()=> '')
@@ -155,7 +173,7 @@ function confirmCancel(){
 const mapEl = ref(null)
 let map, lostMarker
 let sightingMarkers = []
-const markerById = new Map()
+const markerById = new Map() // εδώ κλειδί = index
 
 function loadGoogleMaps(key) {
   return new Promise((resolve) => {
@@ -218,8 +236,8 @@ function renderSightingMarkers(){
   for (const m of sightingMarkers) m.setMap(null)
   sightingMarkers = []; markerById.clear()
 
-  for (const s of sightings.value){
-    if (s?.latitude == null || s?.longitude == null) continue
+  sightings.value.forEach((s, i) => {
+    if (s?.latitude == null || s?.longitude == null) return
     const pos = { lat: Number(s.latitude), lng: Number(s.longitude) }
     const color = getConfidenceColor(s.confidenceIndex)
     const m = new google.maps.Marker({
@@ -227,9 +245,24 @@ function renderSightingMarkers(){
       icon: { url: pawDataUrl(color), scaledSize: new google.maps.Size(38,38), anchor: new google.maps.Point(19,32) },
       zIndex: 10
     })
-    m.addListener('click', () => openSightingOverlayById(s.id))
+    m.addListener('click', () => openSightingOverlay(i))
     sightingMarkers.push(m)
-    if (s?.id != null) markerById.set(String(s.id), m)
+    markerById.set(String(i), m)
+  })
+}
+
+/* --- panTo στο hover του sighting (με index) --- */
+function onHoverSighting(i){
+  if (!map) return
+  const s = sightings.value[i]
+  if (!s || s.latitude == null || s.longitude == null) return
+  const pos = { lat: Number(s.latitude), lng: Number(s.longitude) }
+  map.panTo(pos)
+  if (typeof map.getZoom === 'function' && map.getZoom() < 13) map.setZoom(14)
+  const m = markerById.get(String(i))
+  if (m && google?.maps?.Animation?.BOUNCE){
+    m.setAnimation(google.maps.Animation.BOUNCE)
+    setTimeout(() => m.setAnimation(null), 700)
   }
 }
 
@@ -245,42 +278,25 @@ const sightingOverlayOpen = ref(false)
 const sightingIndex = ref(0)
 const overlayPhotoIndex = ref(0)
 
+/* Photos από presignedImageUrls -> imageUrls */
 function getSightingPhotos(s){
   if (!s) return []
+  if (Array.isArray(s.presignedImageUrls) && s.presignedImageUrls.length) return s.presignedImageUrls
   if (Array.isArray(s.imageUrls) && s.imageUrls.length) return s.imageUrls
-  const arr = s.images || s.photos || s.imageUrls || []
-  return Array.isArray(arr) ? arr : []
+  return []
 }
-function getSightingReporter(s){
-  if (s?.reporter) return s.reporter
-  return s?.reporterUsername
-    || s?.createdByUsername
-    || s?.user?.username
-    || s?.reporter?.username
-    || s?.createdBy?.username
-    || '—'
-}
+/* Reporter string από το DTO */
+function getSightingReporter(s){ return s?.reporter || '—' }
 
-const activeSighting = computed(() => {
-  const s = sightings.value[sightingIndex.value]
-  if (!s) return null
-  const details = sightingDetails.value?.[String(s.id)]
-  return details ? { ...s, ...details } : s
-})
+const activeSighting = computed(() => sightings.value[sightingIndex.value] || null)
 const activePhotos = computed(() => getSightingPhotos(activeSighting.value))
-const activeSightingId = computed(() => sightings.value[sightingIndex.value]?.id)
 
-function openSightingOverlayById(sid){
-  const idx = sightings.value.findIndex(x => String(x.id) === String(sid))
-  if (idx >= 0) openSightingOverlay(idx)
-}
 function openSightingOverlay(i){
   if (!sightings.value.length) return
   sightingIndex.value = i
   overlayPhotoIndex.value = 0
   sightingOverlayOpen.value = true
-  const sid = sightings.value[i]?.id
-  if (sid != null) ensureSightingDetails(sid)
+  ensureSightingDetails(i)
 }
 function closeSightingOverlay(){ sightingOverlayOpen.value = false }
 function prevSightingPhoto(){
@@ -315,10 +331,6 @@ watch(sightings, () => {
   if (sightingIndex.value >= sightings.value.length) sightingIndex.value = 0
   if (!sightings.value.length) sightingOverlayOpen.value = false
 })
-watch(activePhotos, (p) => {
-  if (!p?.length) overlayPhotoIndex.value = 0
-  if (overlayPhotoIndex.value >= (p?.length || 0)) overlayPhotoIndex.value = 0
-})
 
 function goCreateSighting() { router.push({ name: 'sighting-create', params: { id } }) }
 
@@ -341,7 +353,6 @@ onMounted(loadData)
             {{ String(report.dateTimeLost).replace('T',' ').slice(0,16) }}
           </span>
 
-          <!-- ΑΚΡΙΒΩΣ δίπλα από timestamp με ίδιο separator -->
           <span v-if="report?.status" class="sep-dot">•</span>
           <span v-if="report?.status" class="status-chip" :data-status="statusRaw">
             {{ statusText }}
@@ -349,7 +360,6 @@ onMounted(loadData)
         </div>
 
         <div class="right">
-          <!-- NON-OWNER: Create sighting -->
           <button
             v-if="isAuthenticated && !isOwner"
             class="btn"
@@ -358,7 +368,6 @@ onMounted(loadData)
             Create sighting report
           </button>
 
-          <!-- OWNER: Returned / Delete — ΜΟΝΟ όταν ACTIVE -->
           <div v-else-if="isOwner && isActive" class="owner-actions">
             <button
               class="btn green"
@@ -377,34 +386,57 @@ onMounted(loadData)
         </div>
       </header>
 
-      <!-- PHOTOS -->
-      <section class="images">
-        <div class="head">
-          <h2 class="h">Photos</h2>
-        </div>
-
-        <div v-if="images.length" class="grid-squares">
-          <div
-            v-for="(src, i) in images"
-            :key="i"
-            class="square"
-            @click="openViewer(i)"
-            :title="'Open image '+(i+1)"
-          >
-            <img :src="src || FALLBACK" alt="" @error="onImgError" />
+      <!-- ROW: Photos (L) — Details (R) -->
+      <div class="grid-50">
+        <section class="card">
+          <h2 class="h2">Photos</h2>
+          <div v-if="images.length" class="grid-squares" :style="gridStyle">
+            <div
+              v-for="(src, i) in images"
+              :key="i"
+              class="square"
+              @click="openViewer(i)"
+              :title="'Open image '+(i+1)"
+            >
+              <img :src="src || FALLBACK" alt="" @error="onImgError" />
+            </div>
           </div>
-        </div>
 
-        <div v-else class="images-empty">
-          <div class="empty-box">
-            <img src="/no-image.jpg" alt="" class="empty-icon" />
-            <p class="empty-text">No images uploaded.</p>
+          <div v-else class="images-empty">
+            <div class="empty-box">
+              <img src="/no-image.jpg" alt="" class="empty-icon" />
+              <p class="empty-text">No images uploaded.</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- LEFT map — RIGHT sightings -->
-      <div class="grid">
+        <!-- DETAILS (δύο ανά γραμμή, τίτλος από πάνω) -->
+        <section class="card">
+          <h2 class="h2">Pet details</h2>
+          <div class="kv">
+            <div class="item"><span class="k">Pet</span><span class="v">{{ cap(name) }}</span></div>
+            <div class="item"><span class="k">Date lost</span><span class="v">{{ whenLost }}</span></div>
+
+            <div class="item"><span class="k">Address</span><span class="v">{{ address }}</span></div>
+            <div class="item"><span class="k">Status</span><span class="v">{{ statusText }}</span></div>
+
+            <div v-if="report?.species" class="item"><span class="k">Species</span><span class="v">{{ cap(report.species) }}</span></div>
+            <div v-if="report?.breed"   class="item"><span class="k">Breed</span><span class="v">{{ cap(report.breed) }}</span></div>
+
+            <div v-if="report?.color" class="item"><span class="k">Color</span><span class="v">{{ cap(report.color) }}</span></div>
+            <div v-if="report?.size"  class="item"><span class="k">Size</span><span class="v">{{ cap(report.size) }}</span></div>
+
+            <div v-if="report?.gender" class="item"><span class="k">Gender</span><span class="v">{{ cap(report.gender) }}</span></div>
+            <div class="item"><span class="k">Collar</span><span class="v">{{ report.hasCollar ? 'Yes' : 'No' }}</span></div>
+
+            <div v-if="report?.collarColor" class="item"><span class="k">Collar color</span><span class="v">{{ cap(report.collarColor) }}</span></div>
+            <div v-if="report?.notes" class="item full"><span class="k">Notes</span><p class="v multiline">{{ report.notes }}</p></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ROW: Map (L) — Sightings (R) -->
+      <div class="grid-50">
         <section class="card">
           <h2 class="h2">Location</h2>
           <div v-if="report.latitude != null && report.longitude != null">
@@ -421,42 +453,27 @@ onMounted(loadData)
           <p v-else-if="!sightings.length" class="muted">No sightings yet.</p>
 
           <ul v-else class="sightings">
-            <li v-for="s in sightings" :key="s.id" class="sighting" @click="openSightingOverlayById(s.id)">
+            <li
+              v-for="(s,i) in sightings"
+              :key="s.id ?? i"
+              class="sighting"
+              @click="openSightingOverlay(i)"
+              @mouseenter="onHoverSighting(i)"
+            >
               <div class="row">
                 <span class="badge" :class="'c-' + String(s.confidenceIndex || '').toLowerCase()">
-                  {{ s.confidenceIndex || '—' }}
+                  {{ prettyConfidence(s.confidenceIndex) }}
                 </span>
                 <span class="time">{{ s.dateTimeSeen ? String(s.dateTimeSeen).replace('T',' ').slice(0,16) : '—' }}</span>
+                <span class="sep-dot">•</span>
+                <span class="by">by <b class="username">{{ s.reporter || '—' }}</b></span>
               </div>
-              <div class="addr">{{ s.address || '—' }}</div>
-              <div class="meta">
-                <span v-if="s.latitude != null && s.longitude != null">
-                  {{ Number(s.latitude).toFixed(5) }}, {{ Number(s.longitude).toFixed(5) }}
-                </span>
-                <span v-if="s.notes" class="notes">· {{ s.notes }}</span>
-              </div>
+
+              <p v-if="s.notes" class="notes-line">{{ s.notes }}</p>
             </li>
           </ul>
         </section>
       </div>
-
-      <section class="card full">
-        <h2 class="h2">Details</h2>
-        <dl class="details">
-          <div><dt>Pet</dt><dd>{{ name }}</dd></div>
-          <div><dt>Date lost</dt><dd>{{ whenLost }}</dd></div>
-          <div><dt>Address</dt><dd>{{ address }}</dd></div>
-          <div><dt>Status</dt><dd>{{ report.status }}</dd></div>
-          <div v-if="report?.species"><dt>Species</dt><dd>{{ report.species }}</dd></div>
-          <div v-if="report?.breed"><dt>Breed</dt><dd>{{ report.breed }}</dd></div>
-          <div v-if="report?.color"><dt>Color</dt><dd>{{ report.color }}</dd></div>
-          <div v-if="report?.size"><dt>Size</dt><dd>{{ report.size }}</dd></div>
-          <div v-if="report?.gender"><dt>Gender</dt><dd>{{ report.gender }}</dd></div>
-          <div v-if="report?.hasCollar !== undefined"><dt>Collar</dt><dd>{{ report.hasCollar ? 'Yes' : 'No' }}</dd></div>
-          <div v-if="report?.collarColor"><dt>Collar color</dt><dd>{{ report.collarColor }}</dd></div>
-          <div v-if="report?.notes"><dt>Notes</dt><dd>{{ report.notes }}</dd></div>
-        </dl>
-      </section>
 
       <p v-if="error" class="err">{{ error }}</p>
     </section>
@@ -482,7 +499,7 @@ onMounted(loadData)
       <figure class="viewer sighting">
         <header class="sight-head">
           <span class="badge" :class="'c-' + String(activeSighting?.confidenceIndex || '').toLowerCase()">
-            {{ activeSighting?.confidenceIndex || '—' }}
+            {{ prettyConfidence(activeSighting?.confidenceIndex) }}
           </span>
           <span class="when">
             {{ activeSighting?.dateTimeSeen ? String(activeSighting?.dateTimeSeen).replace('T',' ').slice(0,16) : '—' }}
@@ -504,7 +521,7 @@ onMounted(loadData)
 
           <dl class="sight-details">
             <div><dt>Reporter</dt><dd>{{ getSightingReporter(activeSighting) }}</dd></div>
-            <div><dt>Confidence</dt><dd>{{ activeSighting?.confidenceIndex || '—' }}</dd></div>
+            <div><dt>Confidence</dt><dd>{{ prettyConfidence(activeSighting?.confidenceIndex) }}</dd></div>
             <div><dt>Seen at</dt><dd>{{ activeSighting?.dateTimeSeen ? String(activeSighting?.dateTimeSeen).replace('T',' ').slice(0,16) : '—' }}</dd></div>
             <div><dt>Address</dt><dd>{{ activeSighting?.address || '—' }}</dd></div>
             <div><dt>Coordinates</dt>
@@ -520,18 +537,17 @@ onMounted(loadData)
     </div>
   </main>
 </template>
-
 <style scoped>
 .page { background:#fff; min-height:100dvh; }
-.wrap { max-width: 1200px; margin:0 auto; padding:20px; }
+.wrap { max-width: 1200px; margin:0 auto; padding:15px; } /* -25% από 20px */
 
 /* ---------- Header πάνω --------- */
 .head-top{
   display:flex; align-items:center; justify-content:space-between;
-  gap:12px; margin: 2px 0 12px;
+  gap:9px; margin: 2px 0 9px; /* -25% */
 }
 .head-top .left{
-  display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+  display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; /* -25% περίπου */
   color:#103c70;
 }
 .title { margin:0; font-size:28px; font-weight:900; color:#103c70; }
@@ -570,19 +586,43 @@ onMounted(loadData)
 .status-chip[data-status="CANCELLED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
 .status-chip[data-status="ACTIVE"]{ background:#eef2ff; border-color:#c9d7ef; color:#1d2b50; }
 
-/* ---------- Photos section ---------- */
-.images { margin: 10px 0 16px; }
-.images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
+/* ---------- 50/50 grids ---------- */
+.grid-50{
+  display:grid; grid-template-columns: 1fr 1fr; gap:10px; align-items: stretch; /* -25% από 14px */
+  margin-bottom:10px; /* μικρό κενό ανάμεσα στις “σειρές” */
+}
 
+/* ---------- Photos section ---------- */
+.images { margin: 0; }
 .grid-squares{
-  display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px;
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+
+  gap:10px;
+
+  /* ΣΤΑΘΕΡΟ ΥΨΟΣ: ~ δεν αλλάζει το section */
+  height: clamp(260px, 42vh, 520px);
 }
+
 .square{
-  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
-  border-radius:12px; overflow:hidden; aspect-ratio:1/1; cursor:zoom-in;
+  position:relative;
+  background:#e9f0fb;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:12px;
+  overflow:hidden;
+  /* γεμίζει πλήρως το κελί του grid */
+  width:100%;
+  height:100%;
+  cursor:zoom-in;
 }
-.square img{ width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease; }
+
+.square img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  transition: transform .25s ease;
+}
 .square:hover img{ transform: scale(1.02); }
 
 .images-empty{
@@ -593,18 +633,17 @@ onMounted(loadData)
 .empty-icon{ width:96px; height:96px; object-fit:contain; opacity:.9; }
 .empty-text{ color:#475569; font-weight:700; }
 
-/* ---------- layout κάτω ---------- */
-.grid { display:grid; grid-template-columns: 2fr 1fr; gap:14px; }
-.card { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:14px; box-shadow:0 8px 24px rgba(16,60,112,.06); }
-.card.full { grid-column:1 / -1; }
-.h2 { margin:0 0 10px; font-size:18px; font-weight:900; color:#103c70; }
+/* ---------- shared cards ---------- */
+.card { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:12px; box-shadow:0 8px 24px rgba(16,60,112,.06); } /* -~15% */
+.h2 { margin:0 0 8px; font-size:18px; font-weight:900; color:#103c70; } /* -20% */
 
-/* details card */
-.details { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; }
-.details div { display:contents; }
-dt { font-weight:800; color:#0b2e55; }
-dd { margin:0; color:#1f3660; }
-.muted { color:#64748b; margin-top:8px; }
+/* ---------- Pet details (δύο πεδία/γραμμή, τίτλος πάνω) ---------- */
+.kv { display:grid; grid-template-columns: 1fr 1fr; gap:10px 20px; }
+.kv .item{ display:flex; flex-direction:column; gap:1px; }
+.kv .full{ grid-column:1 / -1; }
+.kv .k{ font-size:12px; color:#0b2e55; font-weight:800; opacity:.85; }
+.kv .v{ color:#103c70; font-weight:800; }
+.multiline { white-space:pre-wrap; line-height:1.45; }
 
 /* map */
 .map { width:100%; height:420px; border-radius:12px; background:#e9effa; }
@@ -616,22 +655,24 @@ dd { margin:0; color:#1f3660; }
 .sighting:hover { box-shadow:0 8px 20px rgba(16,60,112,.08); }
 .sighting .row { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
 .sighting .time { color:#475569; font-size:12px; }
-.sighting .addr { font-weight:700; color:#0b2e55; }
-.sighting .meta { color:#475569; font-size:12px; margin-top:4px; }
-.sighting .notes { color:#334155; }
+.sighting .by { color:#0b2e55; font-weight:800; font-size: 12px; }
+.sighting .username { color:#103c70; font-size: 15px; }
+.notes-line{ color:#334155; }
 
-/* badges */
-.badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:900; color:#0b2e55; background:#e2e8f0; border:1px solid rgba(0,0,0,.08); }
+/* badges (ίδια παλέτα) */
+.badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:13px; font-weight:900; color:#0b2e55; background:#e2e8f0; border:1px solid rgba(0,0,0,.08); }
 .badge.c-very_low { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
 .badge.c-low      { background:#fef3c7; color:#92400e; border-color:#fde68a; }
 .badge.c-medium   { background:#ffedd5; color:#9a3412; border-color:#fdba74; }
 .badge.c-high     { background:#dcfce7; color:#14532d; border-color:#bbf7d0; }
 
 /* messages */
-.err { color:#b00020; margin-top:8px; }
+.err { color:#b00020; margin-top:6px; }
 .loading { color:#164a8a; padding:24px; }
 
-@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .grid-50 { grid-template-columns: 1fr; }
+}
 
 /* ---------- overlays (shared) ---------- */
 .overlay { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; padding:16px; }

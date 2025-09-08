@@ -85,11 +85,12 @@ function description(it) {
         <div class="right">
           <h3 class="title">
             <div class="title-heading">
-              <span class="title-chip">Found pet for adoption</span>
+              <span class="title-chip"> Pet for adoption</span>
               <span class="title-id">#{{ it.id }}</span>
+              <span class="title-by">by <b class="username">{{ it.reporter ?? '—' }}</b> </span>
             </div>
             <div class="title-by">
-              by <b class="username">{{ it.reporter ?? '—' }}</b>
+
             </div>
           </h3>
 
@@ -143,7 +144,7 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 /* Κάρτα: 40% / 60% */
 .row{
   display:grid;
-  grid-template-columns: 40% 60%;
+  grid-template-columns: 280px 1fr; /* ← σταθερή αριστερή στήλη */
   align-items: stretch;
   gap:14px;
 
@@ -159,19 +160,21 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 /* Αριστερά */
 .left{
   position:relative;
-  width:45%;
-  min-height: 260px;
+  min-height: 260px;      /* ίδιο ύψος με την κάρτα */
   border-radius:12px;
   overflow:hidden;
   border:1px solid rgba(0,0,0,.06);
   background:#e9f0fb;
 }
+
 .photo{
   position:absolute; inset:0;
   width:100%; height:100%;
-  object-fit: cover;
+  object-fit: cover;       /* γεμίζει */
+  object-position: center; /* κεντράρισμα κάδρου */
   display:block;
 }
+
 .noimg{
   position:absolute; inset:0;
   display:grid; place-items:center;
@@ -182,9 +185,9 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
   filter: drop-shadow(0 2px 8px rgba(0,0,0,.08));
 }
 
+
 /* Δεξιά */
 .right{
-  width:55%;
   display:flex;
   flex-direction:column;
   justify-content:flex-start;

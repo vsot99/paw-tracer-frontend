@@ -1,5 +1,5 @@
 <script setup>
-/* Μόνο layout — αυτή τη φορά ένα section: ProfilePets + ProfileInfo */
+/* Μόνο layout — αυτή τη φορά ένα section: ProfilePets + ProfileInfo + Reports */
 </script>
 
 <template>
@@ -10,6 +10,10 @@
       <div class="grid">
         <ProfilePets class="card" />
         <ProfileInfo class="card" />
+
+        <!-- Full width καθένα -->
+        <ProfileLostReports class="card" />
+        <ProfileFoundReports class="card" />
       </div>
     </section>
   </main>
@@ -19,16 +23,28 @@
 /* local registration για να μη ζητά imports στο main */
 import ProfilePets from '@/components/profile/ProfilePets.vue'
 import ProfileInfo from '@/components/profile/ProfileInfo.vue'
-export default { components: { ProfilePets, ProfileInfo } }
+import ProfileLostReports from '@/components/profile/ProfileLostReports.vue'
+import ProfileFoundReports from '@/components/profile/ProfileFoundReports.vue'
+
+export default {
+  components: {
+    ProfilePets,
+    ProfileInfo,
+    ProfileLostReports,
+    ProfileFoundReports,
+  }
+}
 </script>
 
 <style scoped>
 .profile-page { background: #fff; }
 .wrap { max-width: 1240px; margin: 0 auto; padding: 24px; }
 .title { font-size: 28px; font-weight: 900; color: #103c70; margin: 8px 0 20px; }
+
+/* Στήλη — κάθε section πλήρους πλάτους, όπως και πριν */
 .grid {
   display: grid;
-  grid-template-columns: 1fr; /* μόνο sections σε στήλη, όπως ζήτησες */
+  grid-template-columns: 1fr;
   gap: 18px;
 }
 .card {

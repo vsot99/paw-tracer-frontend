@@ -1,4 +1,4 @@
-<!-- src/views/PetView.vue (updated with Lost-style Photos + per-tile trash delete) -->
+<!-- src/views/PetView.vue (updated: actions centered under sections ~1cm) -->
 <script setup>
 import { ref, computed, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -10,6 +10,28 @@ const router = useRouter()
 const app = useApplicationStore()
 const backend = import.meta.env.VITE_BACKEND
 const petId = route.params.id
+
+// ---- Display/serialize helpers for ALL-CAPS enums ----
+function isAllLatinCaps(str){
+  if (typeof str !== 'string') return false
+  const letters = str.replace(/[^A-Za-z]/g, '')
+  return letters.length > 0 && letters === letters.toUpperCase()
+}
+function humanizeCaps(str){
+  if (typeof str !== 'string') return str
+  if (!isAllLatinCaps(str)) return str
+  const s = str.replace(/[_-]+/g, ' ').toLowerCase()
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+function enumize(str){
+  if (typeof str !== 'string') return str
+  return str.trim().replace(/\s+/g, '_').toUpperCase()
+}
+// format value for VIEW (dd) or disabled fields
+function formatForDisplay(val){
+  if (typeof val === 'string') return humanizeCaps(val)
+  return val
+}
 
 // --- Load Pet ---
 const urlRef = ref(`${backend}/api/pets/${petId}`)
@@ -139,17 +161,20 @@ const temp = reactive({
   color:'', size:'', age:null, weight:null, microchipNumber:'', behavior:''
 })
 
+// Size options: show humanized labels (Title Case)
 const sizeOptions = computed(() => {
   const base = ['SMALL','MEDIUM','LARGE','EXTRA_LARGE']
   const cur = (pet.value?.size ?? '').toString().toUpperCase()
-  return cur && !base.includes(cur) ? [cur, ...base] : base
+  const arr = (cur && !base.includes(cur)) ? [cur, ...base] : base
+  return arr.map(o => humanizeCaps(o))
 })
 
 function startEdit(){
   editError.value = ''; editSuccess.value = ''
   const p = pet.value || {}
   temp.color = p.color ?? ''
-  temp.size = (p.size ?? '').toString().toUpperCase()
+  // show nice value in select, even if original is ALL CAPS
+  temp.size = humanizeCaps((p.size ?? '').toString())
   temp.age = p.age ?? null
   temp.weight = p.weight ?? null
   temp.microchipNumber = p.microchipNumber ?? ''
@@ -166,7 +191,8 @@ function diffEditablePayload(){
     let newVal = temp[k]
     if (k === 'age' && newVal !== null && newVal !== '') newVal = Number.parseInt(newVal)
     if (k === 'weight' && newVal !== null && newVal !== '') newVal = Number.parseFloat(newVal)
-    if (k === 'size' && typeof newVal === 'string') newVal = newVal.toUpperCase()
+    // only size back to enum on send
+    if (k === 'size' && typeof newVal === 'string') newVal = enumize(newVal)
     if (String(oldVal ?? '') !== String(newVal ?? '')) out[k] = newVal
   }
   return out
@@ -214,6 +240,7 @@ const viewEntries = computed(() => {
 })
 const immutableEntries = computed(() => viewEntries.value.filter(e => !editableKeys.includes(e.key)))
 
+
 // --- QR overlay ---
 const qrOpen = ref(false), qrUrl = ref(''), qrError = ref(''), qrLoading = ref(false)
 async function openQr() {
@@ -244,27 +271,18 @@ function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; 
           <h1>{{ pet.name }}</h1>
           <span class="id">#{{ pet.id }}</span>
         </div>
-        <div class="actions">
-          <button class="btn ghost" @click="openQr" :disabled="qrLoading">
-            {{ qrLoading ? 'Loading QR…' : 'Προβολή QR Code' }}
-          </button>
-          <button class="btn ghost" @click="openFilePicker" :disabled="uploading">
-            {{ uploading ? 'Uploading…' : 'Upload photos' }}
-          </button>
-          <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="onFilesSelected" />
-          <button class="btn danger" @click="askDelete">Delete Pet</button>
-        </div>
+        <!-- (actions μεταφέρθηκαν κάτω από τα sections) -->
       </header>
 
       <div class="grid">
-        <!-- PHOTOS (Lost-style grid + per-tile trash like before) -->
-        <section class="card full">
+        <!-- Images (Lost-style grid + per-tile trash like before) -->
+        <section class="card">
           <div class="images">
             <div class="head">
-              <h2 class="h">Photos</h2>
+              <h2 class="h">Images</h2>
             </div>
 
-            <div v-if="images.length" class="grid-squares">
+            <div v-if="images.length" class="grid-squares" :style="gridStyle">
               <div
                 v-for="(src, i) in images"
                 :key="i"
@@ -318,7 +336,7 @@ function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; 
             <template v-for="e in viewEntries" :key="e.key">
               <div>
                 <dt>{{ e.label }}</dt>
-                <dd>{{ e.value ?? '—' }}</dd>
+                <dd>{{ formatForDisplay(e.value) ?? '—' }}</dd>
               </div>
             </template>
           </dl>
@@ -363,7 +381,7 @@ function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; 
               <div class="immutable-grid">
                 <label v-for="e in immutableEntries" :key="e.key" class="field">
                   <span>{{ e.label }}</span>
-                  <input :value="e.value ?? '—'" disabled class="immutable" />
+                  <input :value="formatForDisplay(e.value) ?? '—'" disabled class="immutable" />
                 </label>
               </div>
             </div>
@@ -372,6 +390,18 @@ function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; 
           <p v-if="editError" class="alert err">{{ editError }}</p>
           <p v-if="editSuccess" class="alert ok">{{ editSuccess }}</p>
         </section>
+      </div>
+
+      <!-- ACTIONS: ΚΕΝΤΡΑΡΙΣΜΕΝΑ ΚΑΤΩ ΑΠΟ ΤΑ SECTIONS (~1cm) -->
+      <div class="actions actions-bottom">
+        <button class="btn ghost" @click="openQr" :disabled="qrLoading">
+          {{ qrLoading ? 'Loading QR…' : 'Προβολή QR Code' }}
+        </button>
+        <button class="btn ghost" @click="openFilePicker" :disabled="uploading">
+          {{ uploading ? 'Uploading…' : 'Upload photos' }}
+        </button>
+        <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="onFilesSelected" />
+        <button class="btn danger" @click="askDelete">Delete Pet</button>
       </div>
 
       <p v-if="error" class="err">{{ String(error) }}</p>
@@ -453,21 +483,31 @@ function downloadQr(){ const a=document.createElement('a'); a.href=qrUrl.value; 
 <style scoped>
 .page { background:#fff; min-height:100dvh; }
 .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+/* Header χωρίς actions */
 .head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
 .title { display:flex; align-items:baseline; gap:10px; }
 .title h1 { margin:0; font-size:28px; font-weight:900; color:#103c70; }
 .id { color:#64748b; font-size:13px; }
+
+/* Buttons common */
 .actions { display:flex; gap:10px; flex-wrap:wrap; }
 .btn { height:40px; padding:0 14px; border-radius:10px; border:2px solid #164a8a; background:#164a8a; color:#fff; font-weight:800; cursor:pointer; }
 .btn.ghost { background:#fff; color:#164a8a; }
 .btn.danger { border-color:#b42318; background:#b42318; }
 .hidden { display:none; }
 
-.grid { display:grid; grid-template-columns: 2fr 1fr; gap:14px; }
+/* Grid two columns */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* μισό - μισό */
+  gap: 14px;
+}
 .card { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:14px; box-shadow:0 8px 24px rgba(16,60,112,.06); }
 .card.full { grid-column: 1 / -1; }
 .h2 { margin:0 0 10px; font-size:18px; font-weight:900; color:#103c70; }
 
+/* Details */
 .details-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
 .row-actions { display:flex; gap:8px; }
 .details { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; }
@@ -477,6 +517,7 @@ dd { margin:0; color:#1f3660; }
 .err { color:#b00020; margin-top:8px; }
 .loading { color:#164a8a; padding:24px; }
 
+/* Edit layout */
 .edit-grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start; }
 .col { min-width:0; }
 .fields { display:grid; gap:12px; }
@@ -492,6 +533,13 @@ input.immutable { background:#f3f4f6; color:#6b7280; cursor:not-allowed; }
 .alert { padding:10px 12px; border-radius:10px; margin:10px 0 0; font-size:14px; }
 .alert.err { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 .alert.ok  { background:#e8f7ef; color:#114b2d; border:1px solid #bfe7cf; }
+
+/* ---------- Actions bottom (centered) ---------- */
+.actions-bottom {
+  justify-content: center;         /* κέντρο οριζόντια */
+  margin-top: 1cm;                 /* ~1 εκατοστό κάτω από τα sections */
+  text-align: center;
+}
 
 /* ---------- Shared overlays ---------- */
 .overlay { position:fixed; inset:0; background:rgba(0,0,0,.58); display:flex; align-items:center; justify-content:center; padding:16px; z-index:60; }
@@ -509,13 +557,34 @@ input.immutable { background:#f3f4f6; color:#6b7280; cursor:not-allowed; }
 .h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
 
 .grid-squares{
-  display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:10px;
+  display:grid;
+  grid-template-columns: repeat(2, 1fr);
+
+  gap:10px;
+
+  /* ΣΤΑΘΕΡΟ ΥΨΟΣ: ~ δεν αλλάζει το section */
+  height: clamp(260px, 42vh, 520px);
 }
+
 .square{
-  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
-  border-radius:12px; overflow:hidden; aspect-ratio:1/1; cursor:zoom-in;
+  position:relative;
+  background:#e9f0fb;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:12px;
+  overflow:hidden;
+  /* γεμίζει πλήρως το κελί του grid */
+  width:100%;
+  height:100%;
+  cursor:zoom-in;
 }
-.square img{ width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease; }
+
+.square img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  transition: transform .25s ease;
+}
 .square:hover img{ transform: scale(1.02); }
 
 .images-empty{
@@ -549,5 +618,8 @@ input.immutable { background:#f3f4f6; color:#6b7280; cursor:not-allowed; }
 .nav.prev { left:18px; }
 .nav.next { right:18px; }
 
-@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: 1fr; }
+  .actions-bottom { margin-top: 20px; } /* λίγο μικρότερο κενό σε κινητά */
+}
 </style>

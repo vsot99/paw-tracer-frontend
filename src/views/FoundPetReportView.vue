@@ -102,34 +102,14 @@ async function onFilesSelected(e) {
   }
 }
 
-/** map presigned -> original (ίδιο index) */
+/** χρήση του απλού imageUrls με βάση 1:1 index */
 function originalUrlForIndex(i){
   const arr = report.value.imageUrls || []
   return (i >= 0 && i < arr.length) ? arr[i] : null
 }
 
-// --------- Delete image modal ----------
-const confirmOpen = ref(false)
-const confirmIndex = ref(-1)
-function askDelete(i){
-  if (!isOwner.value) return
-  confirmIndex.value = i
-  confirmOpen.value = true
-}
-function cancelDelete(){
-  confirmOpen.value = false
-  confirmIndex.value = -1
-}
-
-async function confirmDelete(){
-  const i = confirmIndex.value
-  if (i < 0) return cancelDelete()
-  const originalUrl = originalUrlForIndex(i)
-  cancelDelete()
-  if (!originalUrl) {
-    errorMsg.value = 'Could not resolve original image URL.'
-    return
-  }
+/** Εκτέλεση DELETE για εικόνα */
+async function deleteImageByOriginalUrl(originalUrl){
   try{
     imgBusy.value = true
     const headers = {}
@@ -150,6 +130,38 @@ async function confirmDelete(){
   } finally {
     imgBusy.value = false
   }
+}
+
+/* ---------- Confirm modals state ---------- */
+const photoConfirmOpen = ref(false)
+const photoConfirmIndex = ref(-1)
+function askDelete(i){
+  if (!isOwner.value) return
+  photoConfirmIndex.value = i
+  photoConfirmOpen.value = true
+}
+function closePhotoConfirm(){
+  photoConfirmOpen.value = false
+  photoConfirmIndex.value = -1
+}
+async function confirmPhotoDelete(){
+  const i = photoConfirmIndex.value
+  const originalUrl = originalUrlForIndex(i)
+  closePhotoConfirm()
+  if (!originalUrl){
+    errorMsg.value = 'Could not resolve original image URL.'
+    return
+  }
+  await deleteImageByOriginalUrl(originalUrl)
+}
+
+/* Report delete confirm */
+const reportConfirmOpen = ref(false)
+function openReportConfirm(){ if (isOwner.value && isActive.value) reportConfirmOpen.value = true }
+function closeReportConfirm(){ reportConfirmOpen.value = false }
+async function confirmReportDelete(){
+  closeReportConfirm()
+  await updateStatus('CANCELLED')
 }
 
 // --------- Report status actions (owner) ----------
@@ -179,10 +191,6 @@ async function updateStatus(newStatus){
 function onReturnHome(){ updateStatus('RETURNED_HOME') }
 function onOffer(){ updateStatus('FOR_ADOPTION') }
 function onWithdraw(){ updateStatus('ACTIVE') }
-function confirmCancelReport(){
-  const ok = window.confirm('Are you sure you want to delete (cancel) this report?')
-  if (ok) updateStatus('CANCELLED')
-}
 
 // --------- Lightbox ----------
 const lightboxOpen = ref(false)
@@ -192,10 +200,15 @@ function closeLightbox(){ lightboxOpen.value = false }
 function prevImg(){ if (!images.value.length) return; lightboxIndex.value = (lightboxIndex.value - 1 + images.value.length) % images.value.length }
 function nextImg(){ if (!images.value.length) return; lightboxIndex.value = (lightboxIndex.value + 1) % images.value.length }
 function onKey(e){
-  if (!lightboxOpen.value) return
-  if (e.key === 'Escape') return closeLightbox()
-  if (e.key === 'ArrowLeft') return prevImg()
-  if (e.key === 'ArrowRight') return nextImg()
+  // lightbox
+  if (lightboxOpen.value){
+    if (e.key === 'Escape') return closeLightbox()
+    if (e.key === 'ArrowLeft') return prevImg()
+    if (e.key === 'ArrowRight') return nextImg()
+  }
+  // confirm modals: ESC closes
+  if (photoConfirmOpen.value && e.key === 'Escape') return closePhotoConfirm()
+  if (reportConfirmOpen.value && e.key === 'Escape') return closeReportConfirm()
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
@@ -281,6 +294,13 @@ function initMap(){
 
 watch(id, () => fetchReport())
 onMounted(() => { if (id.value) fetchReport() })
+
+/* ---------- helper για enums -> "First capital, rest lower" ---------- */
+function humanizeEnum(val){
+  if (val == null) return ''
+  const s = String(val).replace(/_/g, ' ').trim().toLowerCase()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+}
 </script>
 
 <template>
@@ -295,121 +315,83 @@ onMounted(() => { if (id.value) fetchReport() })
 
           <span v-if="report?.dateTimeFound" class="sep-dot">•</span>
           <span v-if="report?.dateTimeFound" class="when">
-            {{ String(report.dateTimeFound).replace('T',' ').slice(0,16) }}
-          </span>
+          {{ String(report.dateTimeFound).replace('T',' ').slice(0,16) }}
+        </span>
 
-          <!-- Chip ακριβώς δίπλα από το timestamp με ίδιο separator -->
           <span v-if="report?.status" class="sep-dot">•</span>
           <span v-if="report?.status" class="status-chip" :data-status="statusRaw">
             {{ humanStatus }}
           </span>
         </div>
 
-        <div class="right">
-          <!-- OWNER actions (εμφανίζονται ΜΟΝΟ όταν ACTIVE) -->
-          <template v-if="isOwner && isActive">
-            <button class="btn green" :disabled="statusBusy" @click="onReturnHome">Returned home</button>
-            <button class="btn danger" :disabled="statusBusy" @click="confirmCancelReport">Delete</button>
-          </template>
-          <!-- (αν δεν είσαι owner, δεν έχει actions εδώ) -->
+        <div class="right owner-actions" v-if="isOwner">
+          <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="onFilesSelected" />
+          <button class="btn" :disabled="imgBusy" @click="clickUpload">Upload photos</button>
+
+          <button
+            v-if="report.status === 'ACTIVE'"
+            class="btn ghost"
+            :disabled="statusBusy"
+            @click="onOffer"
+          >Offer for adoption</button>
+
+          <button
+            v-if="report.status === 'FOR_ADOPTION'"
+            class="btn ghost"
+            :disabled="statusBusy"
+            @click="onWithdraw"
+          >Withdraw adoption offer</button>
+
+          <button v-if="isActive" class="btn green" :disabled="statusBusy" @click="onReturnHome">Returned home</button>
+          <button v-if="isActive" class="btn danger" :disabled="statusBusy" @click="openReportConfirm">Delete</button>
         </div>
       </header>
 
       <p v-if="errorMsg" class="alert err">{{ errorMsg }}</p>
       <p v-else-if="loading" class="alert info">Loading…</p>
 
-      <!-- SECTION: IMAGES -->
-      <section class="images">
-        <div class="head">
-          <h2 class="h">Images</h2>
-          <div class="actions" v-if="isOwner">
-            <button class="btn" :disabled="imgBusy" @click="clickUpload">Upload photos</button>
-            <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="onFilesSelected" />
-
-            <button
-              v-if="report.status === 'ACTIVE'"
-              class="btn ghost"
-              :disabled="statusBusy"
-              @click="onOffer"
-            >Offer for adoption</button>
-
-            <button
-              v-if="report.status === 'FOR_ADOPTION'"
-              class="btn ghost"
-              :disabled="statusBusy"
-              @click="onWithdraw"
-            >Withdraw adoption offer</button>
+      <div class="grid-main">
+        <!-- Images -->
+        <section class="panel panel-images" aria-labelledby="images-h">
+          <div class="head">
+            <h2 id="images-h" class="h">Images</h2>
           </div>
-        </div>
 
-        <div v-if="images.length" class="grid-squares">
-          <div
-            v-for="(src, i) in images"
-            :key="i"
-            class="square"
-            @click="openLightbox(i)"
-            :title="'Open image '+(i+1)"
-          >
-            <img :src="src || FALLBACK" alt="" @error="onImgError" />
-            <button
-              v-if="isOwner"
-              class="trash"
-              title="Delete image"
-              @click.stop.prevent="askDelete(i)"
+          <div v-if="images.length" class="grid-squares" :style="gridStyle">
+            <div
+              v-for="(src, i) in images"
+              :key="i"
+              class="square"
+              @click="openLightbox(i)"
+              :title="'Open image '+(i+1)"
             >
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Z"/>
-              </svg>
-            </button>
+              <img :src="src || FALLBACK" alt="" @error="onImgError" />
+              <button
+                v-if="isOwner"
+                class="trash"
+                title="Delete image"
+                @click.stop.prevent="askDelete(i)"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                  <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v8h-2V9Zm4 0h2v8h-2V9ZM7 9h2v8H7V9Z"/>
+                </svg>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <div v-else class="images-empty">
-          <div class="empty-box">
-            <img src="/no-image.jpg" alt="" class="empty-icon" />
-            <p class="empty-text">No images uploaded yet.</p>
-            <button
-              v-if="isOwner"
-              class="btn"
-              :disabled="imgBusy"
-              @click="clickUpload"
-            >Upload photos</button>
+          <div v-else class="images-empty">
+            <div class="empty-box">
+              <img src="/no-image.jpg" alt="" class="empty-icon" />
+              <p class="empty-text">No images uploaded yet.</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- LIGHTBOX -->
-      <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox">
-        <button class="lb-btn close" aria-label="Close" @click="closeLightbox">×</button>
-        <button class="lb-btn prev" aria-label="Prev" @click="prevImg">‹</button>
-        <img class="lb-img" :src="images[lightboxIndex] || FALLBACK" alt="" @error="onImgError" />
-        <button class="lb-btn next" aria-label="Next" @click="nextImg">›</button>
-        <div class="lb-count">{{ lightboxIndex+1 }} / {{ images.length }}</div>
-      </div>
-
-      <!-- CONFIRM DELETE MODAL -->
-      <div v-if="confirmOpen" class="modal-overlay" @click.self="cancelDelete">
-        <div class="modal">
-          <header class="modal-head">
-            <h3>Delete photo</h3>
-            <button class="x" aria-label="Close" @click="cancelDelete">✕</button>
-          </header>
-          <div class="modal-body">
-            <p>Are you sure you want to delete this photo?</p>
-          </div>
-          <footer class="modal-foot">
-            <button class="btn ghost" @click="cancelDelete">Cancel</button>
-            <button class="btn danger" @click="confirmDelete">Delete</button>
-          </footer>
-        </div>
-      </div>
-
-      <!-- ΚΑΤΩ GRID -->
-      <div class="grid">
-        <!-- LEFT -->
-        <section class="panel panel-left">
+        <!-- Report details -->
+        <section class="panel panel-report">
           <h2 class="panel-title">Report details</h2>
           <div class="kv">
+            <div><span class="k">Date &amp; Time found</span><span class="v">{{ report.dateTimeFound ? String(report.dateTimeFound).replace('T',' ').slice(0,16) : '—' }}</span></div>
             <div><span class="k">Address</span><span class="v">{{ report.address || '—' }}</span></div>
             <div><span class="k">Holding pet</span><span class="v">{{ report.holdingPet === true ? 'Yes' : report.holdingPet === false ? 'No' : '—' }}</span></div>
             <div class="full">
@@ -417,16 +399,17 @@ onMounted(() => { if (id.value) fetchReport() })
               <p class="v multiline">{{ report.notes || '—' }}</p>
             </div>
           </div>
+        </section>
 
-          <div class="sep"></div>
-
+        <!-- Pet details -->
+        <section class="panel panel-left">
           <h2 class="panel-title">Pet details</h2>
           <div class="kv">
-            <div><span class="k">Species</span><span class="v">{{ report.species || '—' }}</span></div>
+            <div><span class="k">Species</span><span class="v">{{ humanizeEnum(report.species) || '—' }}</span></div>
             <div><span class="k">Breed</span><span class="v">{{ report.breed || '—' }}</span></div>
             <div><span class="k">Color</span><span class="v">{{ report.color || '—' }}</span></div>
-            <div><span class="k">Size</span><span class="v">{{ report.size || '—' }}</span></div>
-            <div><span class="k">Gender</span><span class="v">{{ report.gender || '—' }}</span></div>
+            <div><span class="k">Size</span><span class="v">{{ humanizeEnum(report.size) || '—' }}</span></div>
+            <div><span class="k">Gender</span><span class="v">{{ humanizeEnum(report.gender) || '—' }}</span></div>
             <div><span class="k">Collar</span><span class="v">{{ report.hasCollar === true ? 'Yes' : report.hasCollar === false ? 'No' : '—' }}</span></div>
             <div v-if="report.hasCollar"><span class="k">Collar color</span><span class="v">{{ report.collarColor || '—' }}</span></div>
             <div v-if="report.name"><span class="k">Name on collar</span><span class="v">{{ report.name }}</span></div>
@@ -437,13 +420,9 @@ onMounted(() => { if (id.value) fetchReport() })
           </div>
         </section>
 
-        <!-- RIGHT -->
+        <!-- Location found -->
         <section class="panel panel-right">
-          <h2 class="panel-title">Location</h2>
-          <div class="kv">
-            <div><span class="k">Latitude</span><span class="v">{{ report.latitude ?? '—' }}</span></div>
-            <div><span class="k">Longitude</span><span class="v">{{ report.longitude ?? '—' }}</span></div>
-          </div>
+          <h2 class="panel-title">Location found</h2>
           <div class="map-wrap">
             <div v-if="gmapsKey" ref="mapEl" class="map"></div>
             <div v-else class="map-fallback">
@@ -451,6 +430,49 @@ onMounted(() => { if (id.value) fetchReport() })
             </div>
           </div>
         </section>
+      </div>
+
+      <!-- LIGHTBOX -->
+      <div v-if="lightboxOpen" class="lightbox" @click.self="closeLightbox">
+        <button class="lb-btn close" aria-label="Close" @click="closeLightbox">×</button>
+        <button class="lb-btn prev" aria-label="Prev" @click="prevImg">‹</button>
+        <img class="lb-img" :src="images[lightboxIndex] || FALLBACK" alt="" @error="onImgError" />
+        <button class="lb-btn next" aria-label="Next" @click="nextImg">›</button>
+        <div class="lb-count">{{ lightboxIndex+1 }} / {{ images.length }}</div>
+      </div>
+
+      <!-- CONFIRM DELETE PHOTO MODAL -->
+      <div v-if="photoConfirmOpen" class="confirm-overlay" @click.self="closePhotoConfirm">
+        <div class="confirm">
+          <header class="confirm-head">
+            <h3>Delete photo</h3>
+            <button class="x" aria-label="Close" @click="closePhotoConfirm">✕</button>
+          </header>
+          <div class="confirm-body">
+            <p>Are you sure you want to delete this photo?</p>
+          </div>
+          <footer class="confirm-foot">
+            <button class="btn ghost" @click="closePhotoConfirm">Cancel</button>
+            <button class="btn danger" :disabled="imgBusy" @click="confirmPhotoDelete">Delete</button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- CONFIRM DELETE REPORT MODAL -->
+      <div v-if="reportConfirmOpen" class="confirm-overlay" @click.self="closeReportConfirm">
+        <div class="confirm">
+          <header class="confirm-head">
+            <h3>Delete report</h3>
+            <button class="x" aria-label="Close" @click="closeReportConfirm">✕</button>
+          </header>
+          <div class="confirm-body">
+            <p>Are you sure you want to delete this report?</p>
+          </div>
+          <footer class="confirm-foot">
+            <button class="btn ghost" @click="closeReportConfirm">Cancel</button>
+            <button class="btn danger" :disabled="statusBusy" @click="confirmReportDelete">Delete</button>
+          </footer>
+        </div>
       </div>
     </section>
   </main>
@@ -473,6 +495,7 @@ onMounted(() => { if (id.value) fetchReport() })
 .by { color:#0b2e55; font-weight:900; }
 .username { color:#164a8a; font-size: 20px;}
 .sep-dot { margin: 0 6px; opacity:.6; }
+.owner-actions { display:flex; align-items:center; gap:8px; }
 
 /* CHIP δίπλα στο timestamp */
 .status-chip{
@@ -485,24 +508,10 @@ onMounted(() => { if (id.value) fetchReport() })
   background:#eef2ff;   /* default (ACTIVE-like) */
   color:#1d2b50;
 }
-/* ACTIVE */
-.status-chip[data-status="ACTIVE"]{
-  background:#eef2ff; border-color:#c9d7ef; color:#1d2b50;
-}
-/* FOR_ADOPTION → light orange */
-.status-chip[data-status="FOR_ADOPTION"]{
-  background:#ffedd5;    /* orange-100 */
-  border-color:#fdba74;  /* orange-300 */
-  color:#9a3412;         /* orange-800 */
-}
-/* RETURNED_HOME → green */
-.status-chip[data-status="RETURNED_HOME"]{
-  background:#e8f7ef; border-color:#bfe7cf; color:#114b2d;
-}
-/* CANCELLED → red */
-.status-chip[data-status="CANCELLED"]{
-  background:#fde8ea; border-color:#f3c2c9; color:#7a1020;
-}
+.status-chip[data-status="ACTIVE"]{ background:#eef2ff; border-color:#c9d7ef; color:#1d2b50; }
+.status-chip[data-status="FOR_ADOPTION"]{ background:#ffedd5; border-color:#fdba74; color:#9a3412; }
+.status-chip[data-status="RETURNED_HOME"]{ background:#e8f7ef; border-color:#bfe7cf; color:#114b2d; }
+.status-chip[data-status="CANCELLED"]{ background:#fde8ea; border-color:#f3c2c9; color:#7a1020; }
 
 /* Alerts */
 .alert { margin-top:10px; padding:10px 12px; border-radius:10px; }
@@ -510,7 +519,6 @@ onMounted(() => { if (id.value) fetchReport() })
 .alert.err  { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 
 /* Buttons */
-.right { display:flex; align-items:center; gap:8px; }
 .btn{
   height:38px; padding:0 14px; border-radius:10px; border:2px solid #164a8a;
   background:#164a8a; color:#fff; font-weight:800; letter-spacing:.2px; cursor:pointer;
@@ -522,23 +530,60 @@ onMounted(() => { if (id.value) fetchReport() })
 .btn.danger { background:#b42318; border-color:#b42318; }
 .btn.green  { background:#16a34a; border-color:#16a34a; }
 
+/* ---------- GRID ΜΕ AREAS ---------- */
+.grid-main{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "images report"
+    "pet    location";
+  gap:16px;
+  align-items: stretch;
+}
+.panel-images   { grid-area: images; }
+.panel-report   { grid-area: report; }
+.panel-left     { grid-area: pet; }
+.panel-right    { grid-area: location; }
+
+/* Panels (ίδια «κάρτα» για όλα) */
+.panel {
+  background:#fff; border:1px solid rgba(0,0,0,.08);
+  border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
+  padding:14px; display:flex; flex-direction:column; min-height: 0;
+}
+.panel-title { margin:2px 0 10px; font-size:18px; font-weight:900; color:#103c70; }
+
 /* Images */
-.images { margin: 10px 0 16px; }
 .images .head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .h { font-size:18px; font-weight:900; color:#103c70; margin:0; }
-.actions { display:flex; gap:8px; }
 
-.grid-squares {
+.grid-squares{
   display:grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap:10px;
+
+  /* ΣΤΑΘΕΡΟ ΥΨΟΣ: ~ δεν αλλάζει το section */
+  height: clamp(260px, 42vh, 520px);
 }
-.square {
-  position:relative; background:#e9f0fb; border:1px solid rgba(0,0,0,.08);
-  border-radius:12px; overflow:hidden; aspect-ratio: 1 / 1; cursor: zoom-in;
+
+.square{
+  position:relative;
+  background:#e9f0fb;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:12px;
+  overflow:hidden;
+  /* γεμίζει πλήρως το κελί του grid */
+  width:100%;
+  height:100%;
+  cursor:zoom-in;
 }
-.square img {
-  width:100%; height:100%; object-fit:cover; display:block; transition: transform .25s ease;
+
+.square img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+  transition: transform .25s ease;
 }
 .square:hover img { transform: scale(1.02); }
 
@@ -576,16 +621,7 @@ onMounted(() => { if (id.value) fetchReport() })
 .lb-btn.close{ top: 18px; right: 18px; left: auto; transform:none; width:44px; height:44px; font-size:28px; }
 .lb-count{ position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.55); color:#fff; padding:6px 10px; border-radius:10px; font-weight:800; font-size:12px; }
 
-/* Κάτω grid */
-.grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items: stretch; }
-.panel {
-  background:#fff; border:1px solid rgba(0,0,0,.08);
-  border-radius:14px; box-shadow:0 8px 20px rgba(16,60,112,.06);
-  padding:14px; display:flex; flex-direction:column; height:100%; min-height: 360px;
-}
-.panel-title { margin:2px 0 10px; font-size:18px; font-weight:900; color:#103c70; }
-.sep { margin:12px 0; border-top:1px dashed rgba(0,0,0,.14); }
-
+/* Key-Value */
 .kv { display:grid; grid-template-columns: 1fr 1fr; gap:10px 14px; }
 .kv .full { grid-column: 1 / -1; }
 .k { display:block; font-size:12px; color:#0b2e55; font-weight:800; opacity:.85; }
@@ -604,7 +640,35 @@ onMounted(() => { if (id.value) fetchReport() })
   border-radius:12px; border:1px dashed rgba(0,0,0,.15); color:#6b7280;
 }
 
+/* ---------- Confirm modal (matches screenshot style) ---------- */
+.confirm-overlay{
+  position:fixed; inset:0; background:rgba(0,0,0,.25);
+  display:grid; place-items:center; z-index:160;
+}
+.confirm{
+  width:min(520px, 92vw);
+  background:#fff; border-radius:14px; overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.25); border:1px solid rgba(0,0,0,.08);
+}
+.confirm-head{
+  background:#f1f6ff; /* light blue bar */
+  padding:12px 16px; display:flex; align-items:center; justify-content:space-between;
+  border-bottom:1px solid rgba(0,0,0,.06);
+}
+.confirm-head h3{ margin:0; font-size:18px; color:#103c70; font-weight:900; }
+.confirm-head .x{ background:transparent; border:none; font-size:20px; color:#103c70; cursor:pointer; }
+.confirm-body{ padding:16px; color:#0b2e55; font-weight:700; }
+.confirm-foot{
+  padding:12px 16px; display:flex; justify-content:flex-end; gap:10px;
+  border-top:1px solid rgba(0,0,0,.06);
+}
+
 @media (max-width: 1000px){
-  .grid { grid-template-columns: 1fr; }
+  .grid-main { grid-template-columns: 1fr; grid-template-areas:
+    "images"
+    "report"
+    "pet"
+    "location";
+  }
 }
 </style>
