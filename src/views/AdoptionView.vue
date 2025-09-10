@@ -53,8 +53,19 @@ function description(it) {
 
 <template>
   <section class="wrap">
+    <!-- HERO (ίδιο ύφος με QR page) -->
+    <header class="hero">
+      <h1 class="hero-title">
+        Welcome to the Adoption Hub! Here love isn't bought - it's adopted!
+      </h1>
+
+      <p class="hero-sub">
+        All these pets are looking for a loving family. Browse, search, and create adoption requests to give them a new home.
+      </p>
+    </header>
+
+    <!-- Μικρή μπάρα μετρητή/κατάστασης ακριβώς κάτω από το hero -->
     <header class="head">
-      <h1>Pets available for adoption</h1>
       <div class="meta-bar">
         <span v-if="loading">Loading…</span>
         <span v-else>{{ items.length }} result(s)</span>
@@ -85,12 +96,9 @@ function description(it) {
         <div class="right">
           <h3 class="title">
             <div class="title-heading">
-              <span class="title-chip"> Pet for adoption</span>
+              <span class="title-chip">Pet for adoption</span>
               <span class="title-id">#{{ it.id }}</span>
-              <span class="title-by">by <b class="username">{{ it.reporter ?? '—' }}</b> </span>
-            </div>
-            <div class="title-by">
-
+              <span class="title-by">by <b class="username">{{ it.reporter ?? '—' }}</b></span>
             </div>
           </h3>
 
@@ -117,7 +125,6 @@ function description(it) {
           </div>
 
           <div class="actions">
-            <!-- Προσαρμόζεις το route αν θες άλλο path -->
             <RouterLink :to="`/found-pet/${it.id}`" class="btn ghost">
               More information
             </RouterLink>
@@ -129,9 +136,26 @@ function description(it) {
 </template>
 
 <style scoped>
-.wrap { display:grid; gap:16px; }
-.head { display:flex; align-items:end; justify-content:space-between; gap:12px; }
-h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
+.wrap { display:grid; gap:16px; padding-top: 48px;padding-inline: clamp(120px, 5vw, 0px); }
+
+/* HERO (ίδιο στυλ με το QR view) */
+.hero{ text-align:center; max-width:980px; margin: 0 auto; }
+.hero-title{
+  margin:0;
+  font-size: clamp(22px, 3.2vw, 32px);
+  font-weight: 900;
+  letter-spacing: .2px;
+  color:#103c70;
+}
+.hero-sub{
+  margin:8px 0 0;
+  color:#174a89;
+  opacity:.85;
+  font-size: clamp(14px, 2.2vw, 18px);
+}
+
+/* Μικρή head μπάρα ακριβώς μετά το hero */
+.head { display:flex; align-items:flex-end; justify-content:flex-end; }
 .meta-bar { color:#475569; font-weight:700; }
 
 /* Λίστα */
@@ -144,7 +168,7 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 /* Κάρτα: 40% / 60% */
 .row{
   display:grid;
-  grid-template-columns: 280px 1fr; /* ← σταθερή αριστερή στήλη */
+  grid-template-columns: 280px 1fr;
   align-items: stretch;
   gap:14px;
 
@@ -160,21 +184,19 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 /* Αριστερά */
 .left{
   position:relative;
-  min-height: 260px;      /* ίδιο ύψος με την κάρτα */
+  min-height: 260px;
   border-radius:12px;
   overflow:hidden;
   border:1px solid rgba(0,0,0,.06);
   background:#e9f0fb;
 }
-
 .photo{
   position:absolute; inset:0;
   width:100%; height:100%;
-  object-fit: cover;       /* γεμίζει */
-  object-position: center; /* κεντράρισμα κάδρου */
+  object-fit: cover;
+  object-position: center;
   display:block;
 }
-
 .noimg{
   position:absolute; inset:0;
   display:grid; place-items:center;
@@ -185,41 +207,21 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
   filter: drop-shadow(0 2px 8px rgba(0,0,0,.08));
 }
 
-
 /* Δεξιά */
 .right{
   display:flex;
   flex-direction:column;
-  justify-content:flex-start;
   gap:12px;
   padding-top:4px;
 }
 
 /* Τίτλος */
-.title{
-  margin:0 0 8px 0;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  text-align:center;
-  gap:4px;
-}
-.title-heading{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:8px;
-}
+.title{ margin:0 0 8px 0; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; }
+.title-heading{ display:flex; align-items:center; justify-content:center; gap:8px; }
 .title-chip{
-  display:inline-block;
-  padding:6px 12px;
-  border-radius:999px;
-  background:#f3f7ff;
-  border:1.5px solid #c9d7ef;
-  color:#0b2e55;
-  font-weight:900;
-  font-size: clamp(16px, 2vw, 20px);
-  line-height:1;
+  display:inline-block; padding:6px 12px; border-radius:999px;
+  background:#f3f7ff; border:1.5px solid #c9d7ef; color:#0b2e55; font-weight:900;
+  font-size: clamp(16px, 2vw, 20px); line-height:1;
 }
 .title-id{ color:#64748b; font-weight:800; font-size: clamp(14px, 1.6vw, 18px); }
 .title-by{ color:#0b2e55; font-weight:900; font-size:12px; }
@@ -229,18 +231,13 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 .label{ color:#0b2e55; font-weight:800; font-size:12px; }
 .meta{ display:flex; flex-direction:column; gap:6px; }
 .line{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-
 .tag{
   background:#f1f5ff; color:#0b2e55; font-weight:800;
   padding:2px 8px; border-radius:999px; font-size:12px;
 }
 
 /* Κουμπί */
-.actions{
-  margin-top: 6px;
-  display:flex;
-  justify-content:center;
-}
+.actions{ margin-top: 6px; display:flex; justify-content:center; }
 .btn{
   height: 38px; padding: 0 14px; border-radius: 10px; border: 2px solid #164a8a;
   background: #164a8a; color: #fff; font-weight: 800; cursor: pointer;
@@ -256,7 +253,6 @@ h1 { margin:0; font-size:22px; font-weight:900; color:#103c70; }
 /* Mobile */
 @media (max-width: 980px){
   .row{ grid-template-columns: 1fr; }
-  .left{ width:100%; }
-  .right{ width:100%; }
+  .left, .right{ width:100%; }
 }
 </style>

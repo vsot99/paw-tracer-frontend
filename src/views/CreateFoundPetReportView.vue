@@ -285,11 +285,6 @@ async function onSubmit(){
         <!-- Left column: fields -->
         <div class="col fields">
           <label class="field">
-            <span>Date & time found (optional)</span>
-            <input v-model="form.dateTimeFound" type="datetime-local" />
-          </label>
-
-          <label class="field">
             <span>Address <b class="req">*</b></span>
             <input
               ref="addressInputEl"

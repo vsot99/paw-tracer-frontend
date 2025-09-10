@@ -238,11 +238,6 @@ async function onSubmit() {
           </label>
 
           <label class="field">
-            <span>Date & time seen (optional)</span>
-            <input v-model="form.dateTimeSeen" type="datetime-local" />
-          </label>
-
-          <label class="field">
             <span>Address</span>
             <input
               ref="addressInputEl"

@@ -9,14 +9,21 @@ const router = useRouter()
 const app = useApplicationStore()
 
 /* ================== Enums (UI) ================== */
-const SPECIES = ['DOG', 'CAT'] // Species κανονικά
+const SPECIES = ['DOG', 'CAT']
 const SIZES   = ['SMALL', 'MEDIUM', 'LARGE', 'EXTRA_LARGE']
 const GENDERS = ['MALE', 'FEMALE']
+
+/* Helper: εμφάνιση ωραίας ετικέτας αλλά χωρίς να αλλάζει η τιμή */
+const pretty = (s) =>
+  String(s)
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase())
 
 /* ================== Form model ================== */
 const form = ref({
   species: 'DOG',
-  breed: '',        // τιμή από dropdown (ή "Other")
+  breed: '',
   color: '',
   size: 'MEDIUM',
   gender: 'MALE',
@@ -54,13 +61,12 @@ const breedQuery = ref('')
 const showBreedMenu = ref(false)
 const breedWrapEl = ref(null)
 
-/* Λίστα φυλών για το επιλεγμένο species, με "Other" στο τέλος */
-const availableBreeds = computed(() => {
-  const list = form.value.species === 'DOG' ? breeds.value.DOG
+const availableBreeds = computed(() =>
+  form.value.species === 'DOG' ? breeds.value.DOG
     : form.value.species === 'CAT' ? breeds.value.CAT
       : []
-  return list;
-})
+)
+
 const filteredBreeds = computed(() => {
   const q = breedQuery.value.trim().toLowerCase()
   if (!q) return availableBreeds.value
@@ -73,7 +79,6 @@ function pickBreed(b) {
   showBreedMenu.value = false
 }
 
-/* Αν αλλάξει species, καθάρισε τυχόν επιλογές breed/custom */
 watch(() => form.value.species, () => {
   showBreedMenu.value = false
   form.value.breed = ''
@@ -81,12 +86,10 @@ watch(() => form.value.species, () => {
   customBreed.value = ''
 })
 
-/* Κράτα συγχρονισμένο το query όταν επιλέγεται breed */
 watch(() => form.value.breed, (v) => {
   if (v && v !== breedQuery.value) breedQuery.value = v
 })
 
-/* Click-outside για να κρύβεται το menu */
 function onDocClick(e){
   const el = breedWrapEl.value
   if (!el) return
@@ -95,9 +98,9 @@ function onDocClick(e){
 onMounted(() => document.addEventListener('click', onDocClick))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 
-/* ================== Custom breed όταν Breed=Other ================== */
+/* ================== Custom breed ================== */
 const customBreed = ref('')
-const isOtherBreed = computed(() => form.value.breed === 'Other')
+const isOtherBreed = computed(() => form.value.breed === 'Other') // αν το χρησιμοποιήσεις
 
 /* ================== Validation & Submit ================== */
 const loading = ref(false)
@@ -107,38 +110,20 @@ function validate() {
   errorMsg.value = ''
   const f = form.value
 
-  if (!f.species) {
-    errorMsg.value = 'Species is required.'
-    return false
+  if (!f.species) { errorMsg.value = 'Species is required.'; return false }
+  if (!f.breed)   { errorMsg.value = 'Please pick a breed from the list.'; return false }
+  if (isOtherBreed.value && !customBreed.value.trim()) {
+    errorMsg.value = 'Please fill "Insert breed manually".'; return false
   }
-
-  if (!f.breed) {
-    errorMsg.value = 'Please pick a breed from the list.'
-    return false
-  }
-
-  if (isOtherBreed.value) {
-    if (!customBreed.value.trim()) {
-      errorMsg.value = 'Please fill "Insert breed manually".'
-      return false
-    }
-  }
-
   if (!f.color.trim() || !f.size || !f.gender) {
-    errorMsg.value = 'Please complete all required pet attributes.'
-    return false
+    errorMsg.value = 'Please complete all required pet attributes.'; return false
   }
-  if (!f.name.trim()) {
-    errorMsg.value = 'Name is required.'
-    return false
-  }
+  if (!f.name.trim()) { errorMsg.value = 'Name is required.'; return false }
   if (f.age == null || isNaN(f.age) || Number(f.age) < 0) {
-    errorMsg.value = 'Age must be a non-negative number.'
-    return false
+    errorMsg.value = 'Age must be a non-negative number.'; return false
   }
   if (f.weight == null || isNaN(f.weight) || Number(f.weight) <= 0) {
-    errorMsg.value = 'Weight must be a positive number.'
-    return false
+    errorMsg.value = 'Weight must be a positive number.'; return false
   }
   return true
 }
@@ -150,15 +135,15 @@ async function submit() {
     const token = app.userData?.accessToken
 
     const payload = {
-      species: String(form.value.species).toUpperCase(), // 'DOG' | 'CAT'
+      species: String(form.value.species).toUpperCase(),
+      size:    String(form.value.size).toUpperCase(),
+      gender:  String(form.value.gender).toUpperCase(),
       breed: isOtherBreed.value
         ? customBreed.value.trim()
         : String(form.value.breed).trim(),
-      color: form.value.color.trim(),
-      size: form.value.size,
-      gender: form.value.gender,
-      name: form.value.name.trim(),
-      age: Number(form.value.age),
+      color:  form.value.color.trim(),
+      name:   form.value.name.trim(),
+      age:    Number(form.value.age),
       weight: Number(form.value.weight),
     }
     if (form.value.microchipNumber?.trim()) payload.microchipNumber = form.value.microchipNumber.trim()
@@ -201,11 +186,11 @@ async function submit() {
           <input v-model.trim="form.name" required />
         </label>
 
-        <!-- Species -->
+        <!-- Species (εμφάνιση Pretty, τιμή UPPERCASE) -->
         <label class="field">
           <span>Species *</span>
           <select v-model="form.species" required>
-            <option v-for="s in SPECIES" :key="s" :value="s">{{ s }}</option>
+            <option v-for="s in SPECIES" :key="s" :value="s">{{ pretty(s) }}</option>
           </select>
         </label>
 
@@ -243,17 +228,12 @@ async function submit() {
             >{{ b }}</li>
             <li v-if="filteredBreeds.length === 0" class="empty-item">No matches</li>
           </ul>
-
         </div>
 
         <!-- Insert breed manually (only when Breed=Other) -->
         <label class="field" v-if="isOtherBreed">
           <span>Insert breed manually *</span>
-          <input
-            v-model.trim="customBreed"
-            placeholder="Insert breed manually"
-            required
-          />
+          <input v-model.trim="customBreed" placeholder="Insert breed manually" required />
         </label>
 
         <!-- Color -->
@@ -262,19 +242,19 @@ async function submit() {
           <input v-model.trim="form.color" required />
         </label>
 
-        <!-- Size -->
+        <!-- Size (Pretty label) -->
         <label class="field">
           <span>Size *</span>
           <select v-model="form.size" required>
-            <option v-for="s in SIZES" :key="s" :value="s">{{ s }}</option>
+            <option v-for="s in SIZES" :key="s" :value="s">{{ pretty(s) }}</option>
           </select>
         </label>
 
-        <!-- Gender -->
+        <!-- Gender (Pretty label) -->
         <label class="field">
           <span>Gender *</span>
           <select v-model="form.gender" required>
-            <option v-for="g in GENDERS" :key="g" :value="g">{{ g }}</option>
+            <option v-for="g in GENDERS" :key="g" :value="g">{{ pretty(g) }}</option>
           </select>
         </label>
 
@@ -359,27 +339,15 @@ input:focus, select:focus, textarea:focus {
   height:32px; min-width:32px; border-radius:8px;
   border:1px solid rgba(0,0,0,.14); background:#fff; z-index:1001; cursor:pointer;
 }
-
-/* Το menu δεν σπρώχνει το layout */
 .menu{
-  position:absolute;
-  left:0; right:0;
-  top:calc(100% + 6px);
-  z-index:1000;
-
-  margin:0;
-  border:1px solid rgba(0,0,0,.14);
-  border-radius:12px; background:#fff;
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:1000;
+  margin:0; border:1px solid rgba(0,0,0,.14); border-radius:12px; background:#fff;
   box-shadow:0 12px 28px rgba(16,60,112,.16);
-
-  max-height:224px;
-  overflow:auto;
-  list-style:none; padding:6px;
+  max-height:224px; overflow:auto; list-style:none; padding:6px;
 }
 .item{ padding:8px 10px; border-radius:8px; cursor:pointer; }
 .item:hover{ background:#f3f7ff; }
 .empty-item{ padding:8px 10px; color:#64748b; }
-.picked{ color:#0b2e55; font-size:12px; margin-top:4px; }
 
 /* Actions */
 .actions { grid-column: 1 / -1; display:flex; gap:10px; margin-top:6px; }

@@ -94,7 +94,7 @@ function isCancellable(status){
             class="btn ghost"
             @click="goToPet(r.foundPetId)"
             :title="`Go to /found-pet/${r.foundPetId}`">
-            Go to pet page
+            View pet
           </button>
           <button
             class="btn danger"
