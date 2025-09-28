@@ -1,4 +1,3 @@
-
 <script setup>
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
@@ -25,10 +24,6 @@ const mainImage = computed(() => {
 const petName = computed(() => props.item?.petName || '')
 const showPetName = computed(() => props.type === 'lost' && !!petName.value)
 
-// Description: size, color, species από το ίδιο DTO
-const norm = v => (typeof v === 'string' ? v.trim() : '')
-const hasDescription = computed(() => description.value !== '—')
-
 /* ---------- Meta ---------- */
 const formattedWhen = computed(() => {
   const raw = props.type === 'lost' ? props.item?.dateTimeLost : props.item?.dateTimeFound
@@ -37,7 +32,6 @@ const formattedWhen = computed(() => {
 const address = computed(() => props.item?.address || '—')
 const breed = computed(()=> props.item?.breed || '—')
 const color = computed(()=> props.item?.color || '—')
-// Lost DTO έχει owner (username)
 const reporterUsername = computed(() => {
   const it = props.item || {}
   return it.owner
@@ -47,6 +41,32 @@ const reporterUsername = computed(() => {
     || it.createdByUsername
     || it.user?.username
     || '—'
+})
+
+/* ---------- Distance (top-right badge) ---------- */
+// προσπαθούμε διάφορα πιθανά ονόματα πεδίου
+const rawDistanceMeters = computed(() => {
+  const it = props.item || {}
+  const cand =
+    it.distanceMetersFromUser ??
+    it.distanceMeters ??
+    it.distance_from_user ??
+    it.distanceFromUser ??
+    it.dist_m ??
+    null
+
+  if (cand == null) return null
+  const n = Number(cand)
+  // αν δεν είναι αριθμός ή είναι 0/αρνητικό, μην εμφανίσεις τίποτα
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+
+const distanceText = computed(() => {
+  const m = rawDistanceMeters.value
+  if (m == null) return null
+  if (m < 1000) return `${Math.round(m)} m`
+  const km = m / 1000
+  return km >= 10 ? `${Math.round(km)} km` : `${km.toFixed(1)} km`
 })
 
 /* ---------- Routing ---------- */
@@ -61,7 +81,12 @@ function onImgError(e){ e.target.src = FALLBACK }
 
 <template>
   <article class="row">
-    <!-- ΑΡΙΣΤΕΡΑ: 40% — εικόνα που γεμίζει -->
+    <!-- distance badge -->
+    <div v-if="distanceText" class="dist-badge" title="Distance from you">
+      {{ distanceText }}
+    </div>
+
+    <!-- ΑΡΙΣΤΕΡΑ: 40% — εικόνα -->
     <div class="left">
       <img v-if="mainImage" class="photo" :src="mainImage" alt="" @error="onImgError" />
       <div v-else class="noimg"><img :src="FALLBACK" alt="no image"/></div>
@@ -87,12 +112,12 @@ function onImgError(e){ e.target.src = FALLBACK }
 
         <div class="line">
           <span class="label">Breed:</span>
-          <span class="tag">{{ breed}}</span>
+          <span class="tag">{{ breed }}</span>
         </div>
 
         <div class="line">
           <span class="label">Color:</span>
-          <span class="tag">{{ color}}</span>
+          <span class="tag">{{ color }}</span>
         </div>
 
         <div class="line">
@@ -114,8 +139,8 @@ function onImgError(e){ e.target.src = FALLBACK }
 </template>
 
 <style scoped>
-/* Κάρτα: 40% / 60% σταθερά */
 .row{
+  position: relative; /* για το absolute badge */
   display:grid;
   grid-template-columns: 40% 60%;
   align-items: stretch;
@@ -130,7 +155,18 @@ function onImgError(e){ e.target.src = FALLBACK }
   min-height: 260px;
 }
 
-/* Αριστερά (40%) */
+/* Distance badge */
+.dist-badge{
+  position:absolute; top:3px; right:3px;
+  padding:5px 10px; border-radius:100px;
+  background:#ffffff;
+  color:#103c70; font-weight:900; font-size:12px;
+  border:1px solid rgba(0,0,0,.08);
+  box-shadow:0 6px 18px rgba(16,60,112,.12);
+  z-index: 2;
+}
+
+/* Αριστερά */
 .left{
   position:relative;
   width:45%;
@@ -157,7 +193,7 @@ function onImgError(e){ e.target.src = FALLBACK }
   filter: drop-shadow(0 2px 8px rgba(0,0,0,.08));
 }
 
-/* Δεξιά (60%) */
+/* Δεξιά */
 .right{
   width:55%;
   display:flex;
@@ -167,7 +203,7 @@ function onImgError(e){ e.target.src = FALLBACK }
   padding-top:4px;
 }
 
-/* ΤΙΤΛΟΣ (κεντραρισμένος) */
+/* ΤΙΤΛΟΣ */
 .title{
   margin:0 0 8px 0;
   display:flex;
@@ -197,7 +233,7 @@ function onImgError(e){ e.target.src = FALLBACK }
 .title-by{ color:#0b2e55; font-weight:900; font-size:12px; }
 .username{ color:#164a8a; font-size:12px; }
 
-/* Λεζάντες/γραμμές meta */
+/* Meta */
 .label{ color:#0b2e55; font-weight:800; font-size:12px; }
 .meta{ display:flex; flex-direction:column; gap:6px; }
 .line{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }

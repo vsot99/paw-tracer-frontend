@@ -62,7 +62,7 @@ async function apiPutMe(payload) {
 // ====== Load current user ======
 async function loadUser() {
   if (!isAuthenticated.value) {
-    errorMsg.value = 'Πρέπει να είσαι συνδεδεμένος για να δεις/μεταβάλεις το προφίλ σου.'
+    errorMsg.value = 'You have to be authenticated to access your profile'
     return
   }
   loading.value = true
@@ -99,11 +99,11 @@ function cancel() {
 }
 async function save() {
   errorMsg.value = ''; successMsg.value = ''
-  if (form.email && !String(form.email).includes('@')) { errorMsg.value='Εισάγετε έγκυρο email.'; return }
-  if (form.phoneNumber && form.phoneNumber.length < 10) { errorMsg.value='Εισάγετε έγκυρο τηλέφωνο.'; return }
+  if (form.email && !String(form.email).includes('@')) { errorMsg.value='Please insert a valid email.'; return }
+  if (form.phoneNumber && form.phoneNumber.length < 10) { errorMsg.value='Please insert a valid phone number..'; return }
   if (form.newPassword || form.confirmPassword) {
-    if (form.newPassword !== form.confirmPassword) { errorMsg.value='Οι κωδικοί δεν ταιριάζουν.'; return }
-    if (form.newPassword.length < 6) { errorMsg.value='Ο νέος κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.'; return }
+    if (form.newPassword !== form.confirmPassword) { errorMsg.value='Passwords dont match.'; return }
+    if (form.newPassword.length < 6) { errorMsg.value='New password should consist of at least 6 characters.'; return }
   }
   const payload = diffPayload()
   if (!Object.keys(payload).length) {
@@ -113,9 +113,9 @@ async function save() {
   try {
     await apiPutMe(payload)
     for (const k of ['email','phoneNumber','address','latitude','longitude']) if (k in payload) original[k]=payload[k]
-    successMsg.value = payload.password ? 'Το προφίλ και ο κωδικός ενημερώθηκαν.' : 'Το προφίλ ενημερώθηκε.'
+    successMsg.value = 'Your profile information have been updated.'
     isEditing.value=false; clearPasswordFields()
-  } catch(e){ errorMsg.value = e.message || 'Αποτυχία ενημέρωσης.' }
+  } catch(e){ errorMsg.value = e.message || 'Profile update failed' }
   finally { saving.value=false }
 }
 
@@ -246,7 +246,7 @@ onMounted(loadUser)
       </div>
 
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary" :disabled="saving">
+        <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
           <span v-if="!saving">Save</span><span v-else class="spinner"></span>
         </button>
         <button type="button" class="btn btn-ghost" :disabled="saving" @click="cancel">Cancel</button>

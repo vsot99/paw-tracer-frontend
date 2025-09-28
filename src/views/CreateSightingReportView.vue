@@ -88,10 +88,6 @@ function initMap(center = { lat: 37.9838, lng: 23.7275 }) {
   marker.addListener('dragend', () => {
     const pos = marker.getPosition()
     updateCoords(pos)
-    // Optional reverse geocode για auto-fill διεύθυνσης:
-    // geocoder.geocode({ location: pos }, (results, status) => {
-    //   if (status === 'OK' && results?.[0]) form.value.address = results[0].formatted_address
-    // })
   })
 }
 
@@ -100,13 +96,11 @@ function initMap(center = { lat: 37.9838, lng: 23.7275 }) {
 function navigateAfterSuccess() {
   const idStr = String(lostReportId ?? '')
 
-  // 1) αν υπάρχει history, απλά γύρνα πίσω
   if (window.history.length > 1) {
     router.back()
     return
   }
 
-  // 2) named route αν υπάρχει
   try {
     if (router.hasRoute && router.hasRoute('lost-report-view')) {
       router.replace({ name: 'lost-report-view', params: { id: idStr } })
@@ -118,7 +112,6 @@ function navigateAfterSuccess() {
     }
   } catch {}
 
-  // 3) δοκίμασε μερικά συνηθισμένα paths
   const candidates = [
     `/lost-report/${idStr}`,
     `/lost-reports/${idStr}`,
@@ -132,24 +125,20 @@ function navigateAfterSuccess() {
     }
   }
 
-  // 4) τελική εναλλακτική: πήγαινε στην αρχική
   router.replace({ path: '/' })
 }
 
-// καθάρισμα της φόρμας (κρατάει το marker και τις συντεταγμένες σύμφωνες με τη θέση του)
+// καθάρισμα της φόρμας
 function resetForm() {
   form.value.confidenceIndex = 'MEDIUM'
   form.value.dateTimeSeen = ''
   form.value.address = ''
   form.value.notes = ''
-  // καθάρισε και το raw input του autocomplete
   if (addressInputEl.value) addressInputEl.value.value = ''
-  // ανανέωσε συντεταγμένες με βάση το marker για να είναι συνεπείς
   if (marker?.getPosition) updateCoords(marker.getPosition())
 }
 
 onMounted(async () => {
-  // κέντρο κοντά στο lost report, αν υπάρχει
   let center = { lat: 37.9838, lng: 23.7275 }
   try {
     const r = await fetch(`${backend}/api/lost-pet-reports/${lostReportId}`, { headers: { Accept: 'application/json' } })
@@ -199,17 +188,21 @@ async function onSubmit() {
     }
 
     okMsg.value = 'Sighting report created successfully.'
-
-    // καθάρισε τη φόρμα
     resetForm()
-
-    // ασφαλής πλοήγηση πίσω ή στο view του report
     navigateAfterSuccess()
   } catch (e) {
     errorMsg.value = e?.message || 'Failed to create sighting report.'
   } finally {
     loading.value = false
   }
+}
+
+/** ΜΠΛΟΚΑΡΕ Enter εκτός από textarea & το address input (για Places) */
+function onEnterKey(e){
+  const tag = (e?.target?.tagName || '').toLowerCase()
+  if (tag === 'textarea') return
+  if (addressInputEl.value && e.target === addressInputEl.value) return
+  e.preventDefault()
 }
 </script>
 
@@ -224,7 +217,9 @@ async function onSubmit() {
       <p v-if="errorMsg" class="alert err">{{ errorMsg }}</p>
       <p v-if="okMsg" class="alert ok">{{ okMsg }}</p>
 
-      <form class="grid" @submit.prevent="onSubmit">
+      <!-- ΣΗΜΑΝΤΙΚΟ: δεν καλούμε onSubmit στο @submit, μόνο prevent.
+           Και κόβουμε Enter με onEnterKey -->
+      <form class="grid" @submit.prevent @keydown.enter="onEnterKey">
         <!-- Fields -->
         <div class="col fields">
           <label class="field">
@@ -258,7 +253,8 @@ async function onSubmit() {
             <textarea v-model="form.notes" rows="4" />
           </label>
 
-          <button class="btn" type="submit" :disabled="loading">
+          <!-- Create μόνο με click -->
+          <button class="btn" type="button" :disabled="loading" @click="onSubmit">
             <span v-if="!loading">Create</span>
             <span v-else>Saving…</span>
           </button>

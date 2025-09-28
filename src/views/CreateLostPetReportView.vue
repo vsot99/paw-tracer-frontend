@@ -324,7 +324,7 @@ const coords = computed(() => ({
             <textarea v-model="form.notes" rows="4" />
           </label>
 
-          <button class="btn" type="submit" :disabled="loading || !pets.length">
+          <button class="btn" type="button" :disabled="loading || !pets.length" @click="onSubmit">
             <span v-if="!loading">Create</span>
             <span v-else>Saving…</span>
           </button>

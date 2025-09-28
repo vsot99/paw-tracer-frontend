@@ -1,7 +1,7 @@
 <!-- src/views/CreateFoundPetReportView.vue -->
 <script setup>
 /* global google */
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApplicationStore } from '@/stores/application.js'
 
@@ -21,7 +21,6 @@ const SPECIES_OPTIONS = ['DOG', 'CAT']
 const SIZE_OPTIONS    = ['SMALL','MEDIUM','LARGE','EXTRA_LARGE']
 const GENDER_OPTIONS  = ['MALE','FEMALE']
 
-// UI label helper (SMALL -> "Small", EXTRA_LARGE -> "Extra Large")
 function titleCaseEnum(v) {
   if (!v) return ''
   return String(v)
@@ -56,7 +55,7 @@ const form = ref({
 // UI-only helper
 const nameOnCollar = ref(null) // true | false | null
 
-// ===== Breeds (native select) =====
+// ===== Breeds (data) =====
 const breeds = ref({ DOG: [], CAT: [] })
 async function loadBreeds() {
   const readTxt = async (url) => {
@@ -78,21 +77,53 @@ async function loadBreeds() {
 }
 onMounted(loadBreeds)
 
+// διαθέσιμες φυλές για το επιλεγμένο species (+ "Other" όπως πριν)
 const availableBreeds = computed(() => {
   const list =
     form.value.species === 'DOG' ? breeds.value.DOG :
       form.value.species === 'CAT' ? breeds.value.CAT : []
-  return list.length ? [...list, 'Other'] : []
+  return list.length ? [...list] : []
 })
 
-const customBreed = ref('')
-const isOtherBreed = computed(() => form.value.breed === 'Other')
+// ================== Breed combobox (ΑΚΡΙΒΩΣ όπως στο AddPetView.vue) ==================
+const breedQuery = ref('')
+const showBreedMenu = ref(false)
+const breedWrapEl = ref(null)
 
-// reset breed when species changes
+const filteredBreeds = computed(() => {
+  const q = breedQuery.value.trim().toLowerCase()
+  if (!q) return availableBreeds.value
+  return availableBreeds.value.filter(b => b.toLowerCase().startsWith(q))
+})
+
+function pickBreed(b) {
+  form.value.breed = b
+  breedQuery.value = b
+  showBreedMenu.value = false
+}
+
 watch(() => form.value.species, () => {
+  showBreedMenu.value = false
   form.value.breed = ''
+  breedQuery.value = ''
   customBreed.value = ''
 })
+
+watch(() => form.value.breed, (v) => {
+  if (v && v !== breedQuery.value) breedQuery.value = v
+})
+
+function onDocClick(e){
+  const el = breedWrapEl.value
+  if (!el) return
+  if (!el.contains(e.target)) showBreedMenu.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+// Custom breed (όπως πριν)
+const customBreed = ref('')
+const isOtherBreed = computed(() => form.value.breed === 'Other')
 
 // ----- Google Maps / Places -----
 const mapEl = ref(null)
@@ -201,7 +232,8 @@ async function onSubmit(){
     errorMsg.value = 'Please specify if the pet wore a collar.'
     return
   }
-  if (form.value.hasCollor === true && !String(form.value.collarColor || '').trim()){
+  // (διατηρώ τη λογική όπως ήταν – διόρθωσα μόνο τυπογραφικό hasCollor -> hasCollar)
+  if (form.value.hasCollar === true && !String(form.value.collarColor || '').trim()){
     errorMsg.value = 'Please provide the collar color.'
     return
   }
@@ -324,16 +356,43 @@ async function onSubmit(){
             </select>
           </label>
 
-          <!-- Breed (native select; only when species selected) -->
-          <label class="field" v-if="form.species==='DOG' || form.species==='CAT'">
+          <!-- Breed (searchable combobox — ίδιο logic & style με AddPetView.vue) -->
+          <div class="field breed-field" v-if="form.species==='DOG' || form.species==='CAT'" ref="breedWrapEl">
             <span>Breed <b class="req">*</b></span>
-            <select v-model="form.breed" required>
-              <option disabled value="">Select…</option>
-              <option v-for="b in availableBreeds" :key="b" :value="b">{{ b }}</option>
-            </select>
-          </label>
 
-          <!-- Manual breed UNDER select when "Other" -->
+            <div class="combo">
+              <input
+                class="combo-input"
+                v-model="breedQuery"
+                type="text"
+                placeholder="Search breed…"
+                @focus="showBreedMenu = true"
+                @input="showBreedMenu = true"
+                :aria-expanded="showBreedMenu ? 'true' : 'false'"
+                autocomplete="off"
+                required
+              />
+              <button
+                type="button"
+                class="combo-caret"
+                @click="showBreedMenu = !showBreedMenu"
+                aria-label="Toggle breed list"
+              >▾</button>
+            </div>
+
+            <ul v-show="showBreedMenu" class="menu" role="listbox">
+              <li
+                v-for="b in filteredBreeds"
+                :key="b"
+                class="item"
+                role="option"
+                @mousedown.prevent="pickBreed(b)"
+              >{{ b }}</li>
+              <li v-if="filteredBreeds.length === 0" class="empty-item">No matches</li>
+            </ul>
+          </div>
+
+          <!-- Manual breed UNDER combobox when "Other" -->
           <label class="field" v-if="isOtherBreed">
             <span>Insert breed manually <b class="req">*</b></span>
             <input
@@ -447,6 +506,7 @@ async function onSubmit(){
 
 input, select, textarea {
   border:1px solid rgba(0,0,0,.14); border-radius:12px; padding:10px 12px; font-size:16px; outline:none;
+  background:#fff;
 }
 input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
 
@@ -455,6 +515,30 @@ input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0
 .map { height: 320px; width: 100%; border-radius:14px; border:1px solid rgba(0,0,0,.08); box-shadow:0 8px 20px rgba(16,60,112,.08); }
 .map-fallback { height:320px; display:grid; place-items:center; border-radius:14px; border:1px dashed rgba(0,0,0,.15); color:#6b7280;}
 
+/* ================== Breed combobox styles (ίδια με AddPetView.vue) ================== */
+.breed-field { position: relative; }
+.combo{ position:relative; display:flex; align-items:center; }
+.combo-input{
+  flex:1; height:44px; padding-right:34px;
+  border-radius:12px; border:1px solid rgba(0,0,0,.14); font-size:16px; outline:none; background:#fff;
+}
+.combo-input:focus{ border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12); }
+.combo-caret{
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  height:32px; min-width:32px; border-radius:8px;
+  border:1px solid rgba(0,0,0,.14); background:#fff; z-index:1001; cursor:pointer;
+}
+.menu{
+  position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:1000;
+  margin:0; border:1px solid rgba(0,0,0,.14); border-radius:12px; background:#fff;
+  box-shadow:0 12px 28px rgba(16,60,112,.16);
+  max-height:224px; overflow:auto; list-style:none; padding:6px;
+}
+.item{ padding:8px 10px; border-radius:8px; cursor:pointer; }
+.item:hover{ background:#f3f7ff; }
+.empty-item{ padding:8px 10px; color:#64748b; }
+
+/* Submit */
 .btn {
   height:46px; border-radius:12px; background:#164a8a; color:#fff; font-weight:800; border:none; cursor:pointer;
 }
@@ -464,7 +548,6 @@ input:focus, select:focus, textarea:focus { border-color:#164a8a; box-shadow:0 0
 .alert.err { background:#fde8ea; color:#7a1020; border:1px solid #f3c2c9; }
 .alert.ok  { background:#e8f6ee; color:#0f5132; border:1px solid #badbcc; }
 
-/* (Καμία combobox κλάση πλέον — όλα native selects) */
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .map, .map-fallback { height: 260px; }

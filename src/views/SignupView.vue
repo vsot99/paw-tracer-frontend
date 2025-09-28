@@ -247,7 +247,7 @@ function onSubmit() {
             <span>lng: <b>{{ form.longitude ?? '–' }}</b></span>
           </div>
 
-          <button class="btn" type="submit" :disabled="loading">
+          <button class="btn" type="button" :disabled="loading" @click="onSubmit">
             <span v-if="!loading">Create account</span>
             <span v-else class="spinner"></span>
           </button>

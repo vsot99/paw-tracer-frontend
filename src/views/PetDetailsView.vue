@@ -201,9 +201,9 @@ function diffEditablePayload(){
 async function saveEdit(){
   editError.value = ''; editSuccess.value = ''
   const payload = diffEditablePayload()
-  if (!Object.keys(payload).length){ editSuccess.value = 'Δεν έγιναν αλλαγές.'; isEditing.value = false; return }
-  if (payload.age !== undefined && (payload.age < 0 || !Number.isFinite(payload.age))) { editError.value = 'Το age πρέπει να είναι μη αρνητικός αριθμός.'; return }
-  if (payload.weight !== undefined && (payload.weight < 0 || !Number.isFinite(payload.weight))) { editError.value = 'Το weight πρέπει να είναι μη αρνητικός αριθμός.'; return }
+  if (!Object.keys(payload).length){ editSuccess.value = 'No changes made.'; isEditing.value = false; return }
+  if (payload.age !== undefined && (payload.age < 0 || !Number.isFinite(payload.age))) { editError.value = 'Age cannot be a negative number.'; return }
+  if (payload.weight !== undefined && (payload.weight < 0 || !Number.isFinite(payload.weight))) { editError.value = 'Weight cannot be a negative number'; return }
 
   saving.value = true
   try{
@@ -214,9 +214,9 @@ async function saveEdit(){
     })
     if(!res.ok){ const t = await res.text().catch(()=> ''); throw new Error(t || `Failed to update pet (${res.status})`) }
     data.value = { ...(data.value || {}), ...payload }
-    editSuccess.value = 'Οι αλλαγές αποθηκεύτηκαν.'
+    editSuccess.value = 'Changes have been saved.'
     isEditing.value = false
-  }catch(e){ editError.value = e.message || 'Αποτυχία ενημέρωσης.' } finally{ saving.value = false }
+  }catch(e){ editError.value = e.message || 'Update failed.' } finally{ saving.value = false }
 }
 
 // ---------- VIEW DETAILS ----------

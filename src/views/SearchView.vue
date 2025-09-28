@@ -257,10 +257,16 @@ watch(type, () => runSearch())
 
         <div class="row" v-if="form.species==='DOG' || form.species==='CAT'">
           <label class="lbl">Breed</label>
-          <select v-model="form.breed">
-            <option value="">Select…</option>
-            <option v-for="b in availableBreeds" :key="b" :value="b">{{ b }}</option>
-          </select>
+          <input
+            v-model.trim="form.breed"
+            type="text"
+            list="breed-options"
+            placeholder="Start typing…"
+            autocomplete="off"
+          />
+          <datalist id="breed-options">
+            <option v-for="b in availableBreeds" :key="b" :value="b" />
+          </datalist>
         </div>
 
         <div class="row" v-if="isOtherBreed">
@@ -328,7 +334,7 @@ watch(type, () => runSearch())
   border-radius:14px;
   margin-bottom:8px;
 }
-.row { position:relative; display:flex; align-items:center; gap:10px; }
+.row { position:relative; display:flex; align-items:center; gap:5px; }
 .lbl { min-width:80px; color:#103c70; font-weight:800; }
 select, input[type="text"] {
   flex:1; height:40px; padding:0 10px;
@@ -375,7 +381,15 @@ select:focus, input:focus { border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,7
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .row.area, .actions { grid-column: 1 / -1; }
 }
-
+input[list="breed-options"] {
+  background: #fff;
+  color: #000;
+  flex:1; height:40px; padding:0 10px;
+  border:1px solid #cfe0fb; border-radius:10px; outline:none;
+}
+input[list="breed-options"]:focus{
+  border-color:#164a8a; box-shadow:0 0 0 3px rgba(22,74,138,.12);
+}
 /* Inline custom breed input */
 .other-input{
   flex:1; height:40px; padding:0 10px;
