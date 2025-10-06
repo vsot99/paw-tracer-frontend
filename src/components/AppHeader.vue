@@ -119,7 +119,7 @@ onUnmounted(() => clearInterval(intervalId))
           <RouterLink to="/"        class="nav-link">Home</RouterLink>
           <RouterLink to="/search"  class="nav-link">Search</RouterLink>
           <RouterLink to="/adopt"   class="nav-link">Adopt</RouterLink>
-          <RouterLink to="/about"   class="nav-link">About&nbsp;Us</RouterLink>
+
         </nav>
       </div>
 

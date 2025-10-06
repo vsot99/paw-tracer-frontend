@@ -285,7 +285,7 @@ watch(type, () => runSearch())
             ref="areaInputRef"
             v-model="form.areaText"
             type="text"
-            placeholder="π.χ. Κορυδαλλός"
+            placeholder="e.g.. Piraeus"
             autocomplete="off"
           />
           <button type="button" class="btn ghost" @click="clearArea" v-if="form.areaText">Clear</button>
@@ -327,7 +327,7 @@ watch(type, () => runSearch())
 .filters {
   display:grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap:12px;
+  gap:15px;
   padding:14px;
   background:#f6f9ff;
   border:1px solid #dfe9fb;
